@@ -22,7 +22,7 @@ RUN npm run build
 # ── Stage 2: Serve static files with nginx ────────────────────────────────────
 FROM nginx:1.27-alpine
 
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/dist/client /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE ${PORT:-80}
