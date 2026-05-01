@@ -1,0 +1,40 @@
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+.env.local
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Python bytecode ───────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# ── Test & lint caches ────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+logs/
+tmp/
+
+# ── GeoIP database (large binary, download separately) ───────────────────────
+*.mmdb
+
+# ── InsightFace downloaded model cache ───────────────────────────────────────
+# (auto-downloaded by insightface at runtime — do NOT commit)
+.insightface/
+
+# NOTE: backend/models/risk_model_v1.lgb and calibrator.pkl are intentionally
+# tracked — they are required application artifacts, not build products.

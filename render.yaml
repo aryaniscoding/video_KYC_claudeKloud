@@ -1,0 +1,99 @@
+version: "1"
+
+services:
+
+  # ── 1. FastAPI Backend ──────────────────────────────────────────────────────
+  - type: web
+    name: kyc-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter          # upgrade to standard for more RAM (InsightFace needs ~1 GB)
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: SESSION_TOKEN_TTL_SECONDS
+        value: "86400"
+      - key: ADMIN_DEFAULT_EMAIL
+        sync: false
+      - key: ADMIN_DEFAULT_PASSWORD
+        sync: false
+      - key: LIVEKIT_HOST
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_LLM_MODEL
+        value: llama-3.1-70b-versatile
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: SENDGRID_FROM_NAME
+        value: Poonawalla Fincorp KYC
+      - key: STORAGE_BUCKET_RECORDINGS
+        value: kyc-recordings
+      - key: STORAGE_BUCKET_PDFS
+        value: kyc-pdfs
+      - key: GEOIP_DB_PATH
+        value: ""            # leave empty — backend handles missing GeoIP gracefully
+      - key: FRONTEND_URL
+        sync: false          # set to https://<your-frontend>.onrender.com after first deploy
+      - key: APP_BASE_URL
+        sync: false          # set to https://<this-service>.onrender.com after first deploy
+
+  # ── 2. React Frontend (nginx static) ───────────────────────────────────────
+  - type: web
+    name: kyc-frontend
+    runtime: docker
+    dockerfilePath: ./fincorp-pathfinder/frontend/Dockerfile
+    dockerContext: ./fincorp-pathfinder/frontend
+    plan: free
+    healthCheckPath: /
+    envVars:
+      # These are BUILD-TIME args — Vite bakes them into the JS bundle.
+      # After deploying backend and email services, fill in their Render URLs.
+      - key: VITE_API_BASE_URL
+        sync: false          # https://<kyc-backend>.onrender.com
+      - key: VITE_WS_BASE_URL
+        sync: false          # wss://<kyc-backend>.onrender.com
+      - key: VITE_EMAIL_SERVER_URL
+        sync: false          # https://<kyc-email>.onrender.com
+
+  # ── 3. Nodemailer Email Service ─────────────────────────────────────────────
+  - type: web
+    name: kyc-email
+    runtime: docker
+    dockerfilePath: ./fincorp-pathfinder/frontend/server/Dockerfile
+    dockerContext: ./fincorp-pathfinder/frontend/server
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "3001"
+      - key: EMAIL_HOST
+        value: smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USER
+        sync: false          # your Gmail address (or SMTP user)
+      - key: EMAIL_PASS
+        sync: false          # Gmail App Password (not your login password)
+      - key: EMAIL_FROM
+        sync: false          # e.g.  Poonawalla Fincorp <noreply@yourdomain.com>
+      - key: FRONTEND_URL
+        sync: false          # https://<kyc-frontend>.onrender.com  (for CORS)

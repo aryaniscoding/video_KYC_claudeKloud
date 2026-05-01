@@ -1,0 +1,18 @@
+port: 7880
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+
+keys:
+  devkey: devsecret
+
+logging:
+  pion_level: error
+
+room:
+  auto_create: false
+  max_participants: 2
+
+limit:
+  num_tracks: 4

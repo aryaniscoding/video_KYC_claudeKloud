@@ -1,0 +1,62 @@
+# Hard rules engine — Layer 1 of the decision engine
+# All rules must pass for an application to proceed to ML scoring.
+# Any failure produces an immediate decline with a reason code.
+
+version: "v1.0"
+
+rules:
+  - id: min_age
+    description: Applicant must be at least 21 years old
+    field: estimated_age
+    operator: gte
+    value: 21
+    reason: "Minimum age requirement is 21 years"
+
+  - id: max_age
+    description: Applicant must be under 65 years old
+    field: estimated_age
+    operator: lte
+    value: 65
+    reason: "Maximum age limit is 65 years"
+
+  - id: min_income
+    description: Monthly income must be at least ₹15,000
+    field: monthly_income
+    operator: gte
+    value: 15000
+    reason: "Minimum monthly income required is ₹15,000"
+
+  - id: bureau_score
+    description: CIBIL score must be 650 or above
+    field: credit_score
+    operator: gte
+    value: 650
+    reason: "Credit score must be 650 or above. Check your credit report for errors and clear any dues."
+
+  - id: dpd_24m
+    description: No 90+ day overdue in last 24 months
+    field: dpd_24m
+    operator: lte
+    value: 89
+    reason: "Active delinquency detected. Please clear overdue payments before reapplying."
+
+  - id: foir
+    description: Fixed Obligation to Income Ratio must not exceed 50%
+    field: foir_ratio
+    operator: lte
+    value: 0.50
+    reason: "Your existing loan EMIs exceed 50% of your income. Reduce outstanding obligations and reapply."
+
+  - id: pincode_exclusion
+    description: Applicant pincode must not be in the exclusion list
+    field: pincode
+    operator: not_in_exclusion_list
+    value: null
+    reason: "We are currently unable to service loan applications from your area."
+
+  - id: liveness
+    description: Liveness score must be 0.40 or above after active challenge
+    field: liveness_score
+    operator: gte
+    value: 0.40
+    reason: "Identity verification could not be completed. Please contact our helpline."

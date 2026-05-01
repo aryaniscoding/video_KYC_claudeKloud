@@ -1,0 +1,6 @@
+{
+  "LOW": 0.15,
+  "MEDIUM_LOW": 0.25,
+  "MEDIUM_HIGH": 0.4,
+  "HIGH": 0.5
+}

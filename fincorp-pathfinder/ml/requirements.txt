@@ -1,0 +1,9 @@
+pandas 
+numpy
+ipykernel
+matplotlib
+lightgbm
+xgboost
+scikit-learn
+optuna
+shap

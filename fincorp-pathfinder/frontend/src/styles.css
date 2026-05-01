@@ -1,0 +1,274 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Loan Wizard — Technical Precision design system.
+ * Monochrome surfaces with a single functional amber highlight.
+ * Geist Mono throughout. Sharp 0px corners. Flat. No shadows.
+ */
+
+@theme inline {
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-muted: var(--ink-muted);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-status-amber-bg: var(--status-amber-bg);
+  --color-status-amber-fg: var(--status-amber-fg);
+  --color-status-blue-bg: var(--status-blue-bg);
+  --color-status-blue-fg: var(--status-blue-fg);
+  --color-status-green-bg: var(--status-green-bg);
+  --color-status-green-fg: var(--status-green-fg);
+  --color-status-red-bg: var(--status-red-bg);
+  --color-status-red-fg: var(--status-red-fg);
+  --color-status-orange-bg: var(--status-orange-bg);
+  --color-status-orange-fg: var(--status-orange-fg);
+  --color-status-gray-bg: var(--status-gray-bg);
+  --color-status-gray-fg: var(--status-gray-fg);
+  --color-status-purple-bg: var(--status-purple-bg);
+  --color-status-purple-fg: var(--status-purple-fg);
+}
+
+:root {
+  --radius: 0px;
+
+  --background: oklch(0.985 0.008 60);
+  --foreground: oklch(0.18 0.012 50);
+
+  --surface: oklch(0.985 0.008 60);
+  --surface-dim: oklch(0.88 0.022 55);
+  --surface-container: oklch(0.96 0.014 60);
+  --surface-container-high: oklch(0.93 0.020 58);
+  --on-surface: oklch(0.18 0.012 50);
+  --on-surface-variant: oklch(0.38 0.020 50);
+  --outline: oklch(0.55 0.025 55);
+  --outline-variant: oklch(0.85 0.030 60);
+
+  --primary: oklch(0.666 0.179 58);
+  --primary-foreground: oklch(0.12 0.005 50);
+  --amber: oklch(0.666 0.179 58);
+  --amber-soft: oklch(0.666 0.179 58 / 0.15);
+
+  --ink: oklch(0.16 0.005 50);
+  --ink-2: oklch(0.22 0.008 50);
+  --ink-muted: oklch(0.62 0.015 55);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.012 50);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.012 50);
+  --secondary: oklch(0.93 0.020 58);
+  --secondary-foreground: oklch(0.18 0.012 50);
+  --muted: oklch(0.93 0.020 58);
+  --muted-foreground: oklch(0.45 0.020 55);
+  --accent: oklch(0.93 0.020 58);
+  --accent-foreground: oklch(0.18 0.012 50);
+  --destructive: oklch(0.55 0.20 28);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.666 0.179 58 / 0.25);
+  --input: oklch(0.666 0.179 58 / 0.35);
+  --ring: oklch(0.666 0.179 58);
+
+  --status-amber-bg: oklch(0.666 0.179 58 / 0.18);
+  --status-amber-fg: oklch(0.40 0.14 58);
+  --status-blue-bg: oklch(0.65 0.14 240 / 0.18);
+  --status-blue-fg: oklch(0.38 0.13 240);
+  --status-green-bg: oklch(0.70 0.15 150 / 0.18);
+  --status-green-fg: oklch(0.36 0.12 150);
+  --status-red-bg: oklch(0.65 0.20 28 / 0.18);
+  --status-red-fg: oklch(0.40 0.18 28);
+  --status-orange-bg: oklch(0.72 0.18 45 / 0.20);
+  --status-orange-fg: oklch(0.40 0.16 45);
+  --status-gray-bg: oklch(0.85 0.005 50);
+  --status-gray-fg: oklch(0.35 0.008 50);
+  --status-purple-bg: oklch(0.65 0.14 300 / 0.18);
+  --status-purple-fg: oklch(0.38 0.14 300);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html, body {
+    font-family: var(--font-mono);
+    background-color: var(--color-background);
+    color: var(--color-on-surface);
+    font-feature-settings: "ss01", "cv01";
+  }
+  ::selection { background: var(--amber); color: var(--ink); }
+}
+
+/* ---------- Reusable utility classes ---------- */
+@layer components {
+  .lw-wordmark {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--amber);
+  }
+  .lw-label {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--on-surface-variant);
+  }
+  .lw-divider { border-top: 1px solid var(--border); }
+  .lw-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+  }
+  .lw-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 12px 18px; font-family: var(--font-mono); font-weight: 600;
+    font-size: 14px; letter-spacing: 0.02em; line-height: 1;
+    border: 1px solid transparent; cursor: pointer;
+    transition: background-color .12s, color .12s, border-color .12s;
+  }
+  .lw-btn-primary { background: var(--amber); color: var(--ink); }
+  .lw-btn-primary:hover { background: oklch(0.62 0.18 58); }
+  .lw-btn-primary:disabled { background: var(--surface-dim); color: var(--ink-muted); cursor: not-allowed; }
+  .lw-btn-dark { background: var(--ink); color: oklch(0.98 0 0); }
+  .lw-btn-dark:hover { background: var(--ink-2); }
+  .lw-btn-outline { background: transparent; color: var(--on-surface); border-color: var(--outline); }
+  .lw-btn-outline:hover { border-color: var(--amber); color: var(--amber); }
+  .lw-btn-ghost { background: transparent; color: var(--on-surface); }
+  .lw-btn-ghost:hover { color: var(--amber); }
+  .lw-input {
+    width: 100%; padding: 10px 12px; background: var(--card);
+    border: 1px solid var(--outline-variant); color: var(--on-surface);
+    font-family: var(--font-mono); font-size: 14px; outline: none;
+  }
+  .lw-input:focus { border-color: var(--amber); border-width: 2px; padding: 9px 11px; }
+
+  .lw-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 8px; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+
+  .lw-pulse-dot {
+    width: 8px; height: 8px; background: var(--amber);
+    display: inline-block; animation: lwpulse 1.2s ease-in-out infinite;
+  }
+  .lw-pulse-dot-red {
+    width: 8px; height: 8px; background: oklch(0.60 0.22 28); border-radius: 50%;
+    display: inline-block; animation: lwpulse 1.2s ease-in-out infinite;
+  }
+  .lw-step-glow {
+    box-shadow: 0 0 0 4px var(--amber-soft);
+  }
+  .lw-cam-pip {
+    position: fixed; top: 16px; right: 16px; width: 200px; height: 150px;
+    border: 2px solid var(--amber); background: var(--ink); z-index: 50;
+    overflow: hidden;
+  }
+  .lw-cam-pip video { width: 100%; height: 100%; object-fit: cover; }
+  .lw-cam-label {
+    position: absolute; top: 6px; left: 6px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: oklch(0 0 0 / 0.55); color: white;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+    padding: 3px 6px; text-transform: uppercase;
+  }
+  .lw-cam-pip-caption {
+    position: absolute; bottom: -22px; left: 0; right: 0; text-align: center;
+    font-size: 10px; color: var(--on-surface-variant);
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  @keyframes lwpulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+  }
+
+  .lw-mic-bar {
+    display: inline-block; width: 4px; margin: 0 2px; background: var(--amber);
+    animation: lwbar 0.9s ease-in-out infinite;
+  }
+  @keyframes lwbar {
+    0%, 100% { height: 8px; }
+    50% { height: 28px; }
+  }
+
+  .lw-progress-fill {
+    background: var(--amber);
+    transition: width 0.2s linear;
+  }
+
+  .lw-checkmark-circle {
+    width: 80px; height: 80px; background: oklch(0.70 0.15 150);
+    display: flex; align-items: center; justify-content: center;
+    color: white;
+  }
+
+  .lw-demo-badge {
+    position: fixed; bottom: 8px; left: 8px; z-index: 9999;
+    background: var(--amber); color: white; font-size: 11px;
+    padding: 4px 8px; font-weight: 600; letter-spacing: 0.06em;
+    pointer-events: none;
+  }
+
+  /* Approval celebration */
+  .lw-approve-pulse {
+    position: fixed; inset: 0; pointer-events: none; z-index: 40;
+    background: radial-gradient(circle at 50% 40%, oklch(0.70 0.15 150 / 0.35), transparent 60%);
+    animation: lwapprovepulse 2s ease-out forwards;
+  }
+  @keyframes lwapprovepulse {
+    0% { opacity: 0; }
+    20% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .lw-confetti { position: fixed; inset: 0; pointer-events: none; z-index: 41; overflow: hidden; }
+  .lw-confetti span {
+    position: absolute; top: -10px; width: 8px; height: 14px;
+    animation: lwconfetti 2s linear forwards;
+  }
+  @keyframes lwconfetti {
+    0% { transform: translateY(-20px) rotate(0); opacity: 1; }
+    100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+  }
+}

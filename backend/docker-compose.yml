@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./app:/app/app
+      - ./config:/app/config
+      - ./models:/app/models          # Moksh's .lgb / .pkl files go here
+      - ./data/geoip:/app/data/geoip  # MaxMind GeoLite2 DB files
+    depends_on:
+      - livekit
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "7880:7880"   # HTTP/WebSocket
+      - "7881:7881"   # TCP RTC
+      - "7882:7882/udp" # UDP RTC
+    command: --config /etc/livekit/config.yaml --dev
+    volumes:
+      - ./config/livekit.yaml:/etc/livekit/config.yaml
+    restart: unless-stopped

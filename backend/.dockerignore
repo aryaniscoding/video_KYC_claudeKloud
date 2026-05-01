@@ -1,0 +1,16 @@
+.env
+.env.*
+.env.local
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+*.md
+.git/
+.gitignore
+docker-compose.yml
