@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _PASSIVE_FRAME_COUNT = 15
-_CHALLENGE_FRAME_COUNT = 30   # 2-second blink window at 15fps
+_CHALLENGE_FRAME_COUNT = 30
 
 
 @router.websocket("/ws/liveness/{session_id}")
@@ -46,24 +46,25 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
         session.status = SessionStatus.FACE_CHECK
         await db.commit()
 
-        frames_bgr: list[np.ndarray] = []
-        challenge_frames: list[np.ndarray] = []
+        frames_jpeg: list[bytes] = []
+        challenge_jpeg: list[bytes] = []
         in_challenge = False
 
         try:
             while True:
                 data = await websocket.receive_bytes()
-                frame_bgr = _decode_jpeg(data)
-                if frame_bgr is None:
+
+                # Validate frame is decodable before sending to Rekognition
+                if not _is_valid_jpeg(data):
                     await websocket.send_json({"type": "error", "detail": "invalid_frame"})
                     continue
 
                 if not in_challenge:
-                    frames_bgr.append(frame_bgr)
-                    frame_idx = len(frames_bgr) - 1
+                    frames_jpeg.append(data)
+                    frame_idx = len(frames_jpeg) - 1
 
-                    # Per-frame lightweight result
-                    fr = analyze_frame(frame_bgr, frame_idx)
+                    # Per-frame lightweight result via Rekognition
+                    fr = await analyze_frame(data, frame_idx)
                     await websocket.send_json({
                         "type": "frame_result",
                         "frame_index": frame_idx,
@@ -71,11 +72,10 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                         "face_confidence": fr.face_confidence,
                     })
 
-                    if len(frames_bgr) == _PASSIVE_FRAME_COUNT:
-                        result_passive = run_passive_liveness(frames_bgr)
+                    if len(frames_jpeg) == _PASSIVE_FRAME_COUNT:
+                        result_passive = await run_passive_liveness(frames_jpeg)
 
                         if result_passive.hitl_required:
-                            # < 0.40 after passive — HITL
                             session.liveness_score = result_passive.liveness_score
                             session.face_confidence = result_passive.face_confidence
                             session.estimated_age = result_passive.estimated_age
@@ -94,7 +94,6 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                             return
 
                         if result_passive.active_challenge_required:
-                            # 0.40–0.74 — ask for blink
                             in_challenge = True
                             await websocket.send_json({
                                 "type": "challenge",
@@ -102,7 +101,6 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                                 "liveness_score_so_far": result_passive.liveness_score,
                             })
                         else:
-                            # >= 0.75 — passed passive
                             await _save_liveness(db, session, result_passive)
                             await websocket.send_json({
                                 "type": "liveness_result",
@@ -112,22 +110,18 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                             return
 
                 else:
-                    # Active challenge phase
-                    challenge_frames.append(frame_bgr)
+                    challenge_jpeg.append(data)
                     await websocket.send_json({
                         "type": "challenge_frame",
-                        "frames_received": len(challenge_frames),
+                        "frames_received": len(challenge_jpeg),
                         "frames_needed": _CHALLENGE_FRAME_COUNT,
                     })
 
-                    if len(challenge_frames) == _CHALLENGE_FRAME_COUNT:
-                        blink_result = run_blink_challenge(challenge_frames, required_blinks=2)
-                        # Re-run passive on combined frames with challenge context
-                        combined = frames_bgr + challenge_frames
-                        final_passive = run_passive_liveness(combined)
+                    if len(challenge_jpeg) == _CHALLENGE_FRAME_COUNT:
+                        blink_result = await run_blink_challenge(challenge_jpeg, required_blinks=2)
+                        final_passive = await run_passive_liveness(frames_jpeg + challenge_jpeg)
 
                         if not blink_result["challenge_passed"] or final_passive.liveness_score < 0.40:
-                            # Challenge failed → HITL
                             final_passive.hitl_required = True
                             final_passive.active_challenge_required = False
                             session.status = SessionStatus.HITL
@@ -162,10 +156,10 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _decode_jpeg(data: bytes) -> np.ndarray | None:
+def _is_valid_jpeg(data: bytes) -> bool:
     arr = np.frombuffer(data, dtype=np.uint8)
     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    return frame  # None if decode fails
+    return frame is not None
 
 
 def _result_to_dict(r) -> dict:
@@ -201,11 +195,10 @@ async def _save_liveness(db: AsyncSession, session: Session, result) -> None:
 
 
 async def _log_audit(db: AsyncSession, session: Session, node: str, event_type: str, data: dict) -> None:
-    log = AuditLog(
+    db.add(AuditLog(
         session_id=session.id,
         node_name=node,
         event_type=event_type,
         event_data=data,
         policy_ver=session.policy_ver,
-    )
-    db.add(log)
+    ))

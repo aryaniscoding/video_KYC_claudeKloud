@@ -2,9 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps: OpenCV, InsightFace (libGL), audio (libsndfile1/ffmpeg), build tools
+# System deps: OpenCV (libGL), audio (libsndfile1/ffmpeg)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 libglib2.0-0 libsndfile1 ffmpeg build-essential \
+    libgl1 libglib2.0-0 libsndfile1 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps first so this layer is cached on code-only changes

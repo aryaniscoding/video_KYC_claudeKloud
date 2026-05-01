@@ -1,63 +1,43 @@
 """
-Liveness & Face AI — Phase 4 of the blueprint.
+Liveness & Face AI — Phase 4 (AWS Rekognition backend).
 
-Pipeline:
-  1. Passive liveness: InsightFace ArcFace anti-spoofing on 15 frames
-  2. If score < 0.75 → trigger active challenge (MediaPipe blink detection)
-  3. Age estimation + age_consistency_score
-  4. Stream per-frame results over WebSocket
-
-Singleton model loader — loaded once at startup, reused across all sessions.
+Replaces InsightFace + MediaPipe with AWS Rekognition DetectFaces.
+All 15 passive frames are analysed concurrently (asyncio.gather).
+Liveness signals: detection ratio, confidence, head-pose variance, bbox variance.
+Blink detection: EyesOpen transitions across sampled challenge frames.
 """
+import asyncio
 import logging
 import threading
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Generator
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
-import cv2
+import boto3
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from app.config import get_settings
 
-# ── Model singleton ────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+settings = get_settings()
 
 _lock = threading.Lock()
-_face_app = None
-_mp_face_mesh = None
+_client = None
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
-def _get_face_app():
-    global _face_app
-    if _face_app is None:
+def _get_client():
+    global _client
+    if _client is None:
         with _lock:
-            if _face_app is None:
-                import insightface
-                app = insightface.app.FaceAnalysis(
-                    name="buffalo_l",
-                    providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            if _client is None:
+                _client = boto3.client(
+                    "rekognition",
+                    region_name=settings.aws_region,
+                    aws_access_key_id=settings.aws_access_key_id,
+                    aws_secret_access_key=settings.aws_secret_access_key,
                 )
-                app.prepare(ctx_id=0, det_size=(640, 640))
-                _face_app = app
-                logger.info("InsightFace buffalo_l loaded")
-    return _face_app
-
-
-def _get_mp_face_mesh():
-    global _mp_face_mesh
-    if _mp_face_mesh is None:
-        with _lock:
-            if _mp_face_mesh is None:
-                import mediapipe as mp
-                _mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-                    static_image_mode=False,
-                    max_num_faces=1,
-                    refine_landmarks=True,
-                    min_detection_confidence=0.5,
-                    min_tracking_confidence=0.5,
-                )
-                logger.info("MediaPipe FaceMesh loaded")
-    return _mp_face_mesh
+                logger.info("Rekognition client ready (region=%s)", settings.aws_region)
+    return _client
 
 
 # ── Data structures ────────────────────────────────────────────────────────────
@@ -68,9 +48,12 @@ class FrameResult:
     face_detected: bool
     face_confidence: float
     bbox: list[float] | None
-    embedding: np.ndarray | None
     estimated_age: float | None
     gender: str | None
+    pose_yaw: float | None = None
+    pose_pitch: float | None = None
+    eyes_open: bool | None = None
+    sharpness: float | None = None
 
 
 @dataclass
@@ -88,109 +71,104 @@ class LivenessResult:
     hitl_required: bool
 
 
-# ── Frame analysis ─────────────────────────────────────────────────────────────
+# ── Rekognition call (sync wrapped for async) ──────────────────────────────────
 
-def analyze_frame(frame_bgr: np.ndarray, frame_index: int) -> FrameResult:
-    """Run InsightFace on a single BGR frame. Returns face metadata."""
-    app = _get_face_app()
-    faces = app.get(frame_bgr)
+def _detect_sync(jpeg_bytes: bytes) -> dict:
+    try:
+        return _get_client().detect_faces(
+            Image={"Bytes": jpeg_bytes},
+            Attributes=["ALL"],
+        )
+    except Exception as exc:
+        logger.warning("Rekognition DetectFaces error: %s", exc)
+        return {"FaceDetails": []}
+
+
+async def _detect(jpeg_bytes: bytes) -> dict:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, _detect_sync, jpeg_bytes)
+
+
+# ── Per-frame analysis ─────────────────────────────────────────────────────────
+
+async def analyze_frame(jpeg_bytes: bytes, frame_index: int) -> FrameResult:
+    resp = await _detect(jpeg_bytes)
+    faces = resp.get("FaceDetails", [])
 
     if not faces:
         return FrameResult(
-            frame_index=frame_index,
-            face_detected=False,
-            face_confidence=0.0,
-            bbox=None,
-            embedding=None,
-            estimated_age=None,
-            gender=None,
+            frame_index=frame_index, face_detected=False,
+            face_confidence=0.0, bbox=None,
+            estimated_age=None, gender=None,
         )
 
-    # Pick the largest face
-    face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+    face = max(faces, key=lambda f: f.get("Confidence", 0))
+    age_low  = face.get("AgeRange", {}).get("Low",  25)
+    age_high = face.get("AgeRange", {}).get("High", 35)
+    bb       = face.get("BoundingBox", {})
+    pose     = face.get("Pose", {})
 
     return FrameResult(
         frame_index=frame_index,
         face_detected=True,
-        face_confidence=float(face.det_score),
-        bbox=face.bbox.tolist(),
-        embedding=face.normed_embedding if hasattr(face, "normed_embedding") else None,
-        estimated_age=float(face.age) if hasattr(face, "age") and face.age is not None else None,
-        gender="M" if hasattr(face, "gender") and face.gender == 1 else "F",
+        face_confidence=round(face.get("Confidence", 0) / 100.0, 4),
+        bbox=[bb.get("Left", 0), bb.get("Top", 0), bb.get("Width", 0), bb.get("Height", 0)],
+        estimated_age=round((age_low + age_high) / 2.0, 1),
+        gender="M" if face.get("Gender", {}).get("Value") == "Male" else "F",
+        pose_yaw=pose.get("Yaw"),
+        pose_pitch=pose.get("Pitch"),
+        eyes_open=face.get("EyesOpen", {}).get("Value", True),
+        sharpness=face.get("Quality", {}).get("Sharpness"),
     )
 
 
-def compute_liveness_score(frame_results: list[FrameResult]) -> dict:
-    """
-    Compute liveness score from 15 frame results.
+# ── Liveness scoring ───────────────────────────────────────────────────────────
 
-    Signals used:
-    - Face detection consistency across frames (live faces persist)
-    - Face confidence mean
-    - Embedding variance (live faces show micro-movements; static photos don't)
-    - Bounding box area variance (natural head movement)
-    """
+def compute_liveness_score(frame_results: list[FrameResult]) -> dict:
     detected = [r for r in frame_results if r.face_detected]
     detection_ratio = len(detected) / max(len(frame_results), 1)
 
     if detection_ratio < 0.5:
-        # Can't detect face in >50% of frames — not a spoofing attack, bad conditions
-        return {
-            "liveness_score": 0.0,
-            "spoof_type": "face_not_detected",
-            "face_detected": False,
-            "face_confidence": 0.0,
-        }
+        return {"liveness_score": 0.0, "spoof_type": "face_not_detected",
+                "face_detected": False, "face_confidence": 0.0}
 
     confidence_mean = float(np.mean([r.face_confidence for r in detected]))
 
-    # Embedding variance — live faces have small natural drift between frames
-    embeddings = [r.embedding for r in detected if r.embedding is not None]
-    embedding_var_score = 0.5  # default if insufficient data
-    if len(embeddings) >= 3:
-        emb_matrix = np.stack(embeddings)
-        # Cosine variance: live face ≈ 0.02–0.10; printed photo ≈ 0.001
-        cos_sims = []
-        for i in range(len(emb_matrix) - 1):
-            sim = float(np.dot(emb_matrix[i], emb_matrix[i + 1]))
-            cos_sims.append(sim)
-        avg_cos_sim = float(np.mean(cos_sims))
-        # Very high similarity (>0.999) suggests static image/replay
-        if avg_cos_sim > 0.999:
-            embedding_var_score = 0.1
-        elif avg_cos_sim > 0.995:
-            embedding_var_score = 0.6
+    # Head-pose yaw variance — live faces drift naturally; printed photos are static
+    yaw_vals = [r.pose_yaw for r in detected if r.pose_yaw is not None]
+    pose_var_score = 0.5
+    if len(yaw_vals) >= 3:
+        yaw_std = float(np.std(yaw_vals))
+        if yaw_std < 0.5:
+            pose_var_score = 0.1   # completely static → likely photo/replay
+        elif yaw_std < 2.0:
+            pose_var_score = 0.5
         else:
-            embedding_var_score = 0.9
+            pose_var_score = min(yaw_std / 10.0, 1.0)
 
-    # BBox area variance — live head moves slightly
-    bbox_areas = [(r.bbox[2] - r.bbox[0]) * (r.bbox[3] - r.bbox[1]) for r in detected if r.bbox]
+    # BBox area variance — natural head movement changes face size slightly
+    bbox_areas = [r.bbox[2] * r.bbox[3] for r in detected if r.bbox]
     bbox_var_score = 0.5
     if len(bbox_areas) >= 3:
         area_cv = float(np.std(bbox_areas) / (np.mean(bbox_areas) + 1e-6))
-        bbox_var_score = min(area_cv * 10, 1.0)  # 0.0–1.0
+        bbox_var_score = min(area_cv * 10, 1.0)
 
-    # Weighted liveness score
-    liveness_score = (
-        detection_ratio * 0.25
-        + confidence_mean * 0.25
-        + embedding_var_score * 0.30
-        + bbox_var_score * 0.20
-    )
-    liveness_score = round(min(liveness_score, 1.0), 4)
+    liveness_score = round(min(
+        detection_ratio  * 0.25
+        + confidence_mean  * 0.25
+        + pose_var_score   * 0.30
+        + bbox_var_score   * 0.20,
+        1.0,
+    ), 4)
 
     spoof_type = None
     if liveness_score < 0.40:
         spoof_type = "print_or_replay"
-    elif embedding_var_score < 0.2:
+    elif pose_var_score < 0.2:
         spoof_type = "static_photo"
 
-    return {
-        "liveness_score": liveness_score,
-        "spoof_type": spoof_type,
-        "face_detected": True,
-        "face_confidence": round(confidence_mean, 4),
-    }
+    return {"liveness_score": liveness_score, "spoof_type": spoof_type,
+            "face_detected": True, "face_confidence": round(confidence_mean, 4)}
 
 
 def estimate_age_stats(frame_results: list[FrameResult]) -> dict:
@@ -205,89 +183,52 @@ def estimate_age_stats(frame_results: list[FrameResult]) -> dict:
 
 
 def compute_age_consistency(estimated_age: float | None, declared_age: float | None) -> float:
-    """age_consistency = max(0.0, 1.0 − (age_delta / 15.0)) as per blueprint."""
     if estimated_age is None or declared_age is None:
-        return 0.5   # no signal — neutral
-    age_delta = abs(estimated_age - declared_age)
-    return round(max(0.0, 1.0 - age_delta / 15.0), 4)
+        return 0.5
+    return round(max(0.0, 1.0 - abs(estimated_age - declared_age) / 15.0), 4)
 
 
-# ── Active challenge: blink detection via MediaPipe ────────────────────────────
+# ── Blink challenge via EyesOpen transitions ───────────────────────────────────
 
-_LEFT_EYE_IDX = [362, 385, 387, 263, 373, 380]
-_RIGHT_EYE_IDX = [33, 160, 158, 133, 153, 144]
-_EAR_THRESHOLD = 0.22
-_BLINK_CONSEC_FRAMES = 2
+async def run_blink_challenge(frames_jpeg: list[bytes], required_blinks: int = 2) -> dict:
+    # Sample every 3rd frame — reduces API calls while keeping temporal resolution
+    indices = list(range(0, len(frames_jpeg), 3))
+    results = await asyncio.gather(*[analyze_frame(frames_jpeg[i], i) for i in indices])
 
-
-def _eye_aspect_ratio(landmarks, eye_indices: list[int], img_h: int, img_w: int) -> float:
-    pts = [
-        np.array([landmarks[i].x * img_w, landmarks[i].y * img_h])
-        for i in eye_indices
-    ]
-    # EAR formula: vertical distances / (2 × horizontal distance)
-    A = np.linalg.norm(pts[1] - pts[5])
-    B = np.linalg.norm(pts[2] - pts[4])
-    C = np.linalg.norm(pts[0] - pts[3])
-    return (A + B) / (2.0 * C + 1e-6)
-
-
-def detect_blink_in_frame(frame_bgr: np.ndarray) -> tuple[float, bool]:
-    """Returns (ear_value, is_blink)."""
-    mesh = _get_mp_face_mesh()
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    result = mesh.process(rgb)
-    if not result.multi_face_landmarks:
-        return 0.3, False
-    h, w = frame_bgr.shape[:2]
-    lm = result.multi_face_landmarks[0].landmark
-    left_ear = _eye_aspect_ratio(lm, _LEFT_EYE_IDX, h, w)
-    right_ear = _eye_aspect_ratio(lm, _RIGHT_EYE_IDX, h, w)
-    ear = (left_ear + right_ear) / 2.0
-    return float(ear), ear < _EAR_THRESHOLD
-
-
-def run_blink_challenge(frames_bgr: list[np.ndarray], required_blinks: int = 2) -> dict:
-    """
-    Processes a sequence of frames and counts confirmed blinks.
-    Returns {blinks_detected, challenge_passed, ear_values}.
-    """
     blink_counter = 0
-    consec_below = 0
-    ear_values = []
+    was_open = True
+    eye_states = []
 
-    for frame in frames_bgr:
-        ear, is_blink = detect_blink_in_frame(frame)
-        ear_values.append(round(ear, 4))
-        if is_blink:
-            consec_below += 1
-        else:
-            if consec_below >= _BLINK_CONSEC_FRAMES:
+    for r in results:
+        if r.face_detected and r.eyes_open is not None:
+            eye_states.append(r.eyes_open)
+            if was_open and not r.eyes_open:
                 blink_counter += 1
-            consec_below = 0
+            was_open = r.eyes_open
 
     return {
         "blinks_detected": blink_counter,
         "challenge_passed": blink_counter >= required_blinks,
-        "ear_values": ear_values,
+        "eye_states": eye_states,
     }
 
 
-# ── Full liveness pipeline (used by WS handler) ───────────────────────────────
+# ── Full passive liveness pipeline ────────────────────────────────────────────
 
-def run_passive_liveness(frames_bgr: list[np.ndarray], declared_age: float | None = None) -> LivenessResult:
-    """
-    Run full passive liveness on 15 frames.
-    Returns LivenessResult with all signals.
-    """
-    frame_results = [analyze_frame(f, i) for i, f in enumerate(frames_bgr)]
-    scores = compute_liveness_score(frame_results)
-    age_stats = estimate_age_stats(frame_results)
+async def run_passive_liveness(
+    frames_jpeg: list[bytes],
+    declared_age: float | None = None,
+) -> LivenessResult:
+    # All 15 frames in parallel — total wall time ≈ single Rekognition call latency
+    frame_results = list(await asyncio.gather(
+        *[analyze_frame(frames_jpeg[i], i) for i in range(len(frames_jpeg))]
+    ))
+
+    scores        = compute_liveness_score(frame_results)
+    age_stats     = estimate_age_stats(frame_results)
     age_consistency = compute_age_consistency(age_stats.get("estimated_age"), declared_age)
 
     liveness_score = scores["liveness_score"]
-    active_challenge_required = liveness_score < 0.75 and liveness_score >= 0.40
-    hitl_required = liveness_score < 0.40
 
     return LivenessResult(
         liveness_score=liveness_score,
@@ -295,10 +236,10 @@ def run_passive_liveness(frames_bgr: list[np.ndarray], declared_age: float | Non
         spoof_type=scores.get("spoof_type"),
         face_detected=scores["face_detected"],
         face_confidence=scores["face_confidence"],
-        frames_analyzed=len(frames_bgr),
+        frames_analyzed=len(frames_jpeg),
         estimated_age=age_stats.get("estimated_age"),
         age_range=age_stats.get("age_range"),
         age_consistency_score=age_consistency,
-        active_challenge_required=active_challenge_required,
-        hitl_required=hitl_required,
+        active_challenge_required=0.40 <= liveness_score < 0.75,
+        hitl_required=liveness_score < 0.40,
     )

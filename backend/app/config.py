@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     groq_api_key: str
     groq_llm_model: str = "openai/gpt-oss-20b"
 
+    # AWS Rekognition
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "ap-south-1"
+
     # GeoIP
     geoip_db_path: str = "/app/data/geoip/GeoLite2-City.mmdb"
 

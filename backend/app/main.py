@@ -27,20 +27,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("Starting Video KYC backend (env=%s)", settings.app_env)
-    # Warm up heavy models on startup in background
-    import asyncio
-    asyncio.create_task(_warm_models())
     yield
     logger.info("Shutting down")
-
-
-async def _warm_models():
-    """Pre-load InsightFace on startup so first liveness check isn't slow."""
-    try:
-        from app.services.liveness_service import _get_face_app
-        _get_face_app()
-    except Exception as e:
-        logger.warning("InsightFace warm-up failed: %s", e)
 
 
 app = FastAPI(

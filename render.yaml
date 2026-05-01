@@ -49,6 +49,12 @@ services:
         value: kyc-recordings
       - key: STORAGE_BUCKET_PDFS
         value: kyc-pdfs
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: ap-south-1
       - key: GEOIP_DB_PATH
         value: ""            # leave empty — backend handles missing GeoIP gracefully
       - key: FRONTEND_URL
