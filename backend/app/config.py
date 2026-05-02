@@ -36,10 +36,8 @@ class Settings(BaseSettings):
     # GeoIP
     geoip_db_path: str = "/app/data/geoip/GeoLite2-City.mmdb"
 
-    # SendGrid
-    sendgrid_api_key: str = ""
-    sendgrid_from_email: str = "kyc@poonawalla.com"
-    sendgrid_from_name: str = "Poonawalla Fincorp"
+    # Email service (nodemailer HTTP server)
+    email_service_url: str = "http://localhost:3001"
 
     # Storage
     storage_bucket_recordings: str = "kyc-recordings"
