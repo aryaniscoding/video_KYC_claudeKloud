@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,40 +18,35 @@ export function previewEmail(customerName, sessionUrl, expiryHours) {
 }
 
 /**
- * Send a KYC session email via Brevo HTTP API.
- * Requires BREVO_API_KEY, EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME in env.
+ * Send via AWS SES SMTP endpoint — works on Railway (port 587 is allowed for SES).
+ * Requires: AWS_SES_SMTP_USER, AWS_SES_SMTP_PASS, AWS_SES_REGION, EMAIL_FROM in env.
+ *
+ * Get SMTP credentials from: AWS Console → SES → SMTP Settings → Create SMTP credentials
+ * These are DIFFERENT from your regular AWS access keys.
  */
 export async function sendKycEmail({ toEmail, customerName, sessionUrl, expiryHours }) {
   const html = previewEmail(customerName, sessionUrl, expiryHours);
 
-  const apiKey = process.env.BREVO_API_KEY;
-  if (!apiKey) throw new Error("BREVO_API_KEY not set");
-
-  const fromName = process.env.EMAIL_FROM_NAME || "Loan Wizard";
-  const fromAddress = process.env.EMAIL_FROM_ADDRESS;
-  if (!fromAddress) throw new Error("EMAIL_FROM_ADDRESS not set");
-
-  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method: "POST",
-    headers: {
-      "accept": "application/json",
-      "api-key": apiKey,
-      "content-type": "application/json",
+  const region = process.env.AWS_SES_REGION || "ap-south-1";
+  const transporter = nodemailer.createTransport({
+    host: `email-smtp.${region}.amazonaws.com`,
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.AWS_SES_SMTP_USER,
+      pass: process.env.AWS_SES_SMTP_PASS,
     },
-    body: JSON.stringify({
-      sender: { name: fromName, email: fromAddress },
-      to: [{ email: toEmail, name: customerName }],
-      subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
-      htmlContent: html,
-      textContent: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
-    }),
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Brevo API ${res.status}: ${body}`);
-  }
+  const from = process.env.EMAIL_FROM || `Loan Wizard <${process.env.AWS_SES_SMTP_USER}>`;
 
-  const data = await res.json();
-  return { success: true, messageId: data.messageId || "sent" };
+  const info = await transporter.sendMail({
+    from,
+    to: toEmail,
+    subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
+    html,
+    text: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
+  });
+
+  return { success: true, messageId: info.messageId };
 }
