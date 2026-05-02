@@ -14,7 +14,6 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "@getbrevo/brevo": "^2.0.0",
     "nodemailer": "^8.0.7"
   }
 }
