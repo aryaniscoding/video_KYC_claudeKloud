@@ -1,7 +1,6 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,36 +16,35 @@ export function previewEmail(customerName, sessionUrl, expiryHours) {
     .replace(/\{\{EXPIRY_HOURS\}\}/g, String(expiryHours));
 }
 
-/**
- * Send via AWS SES SMTP endpoint — works on Railway (port 587 is allowed for SES).
- * Requires: AWS_SES_SMTP_USER, AWS_SES_SMTP_PASS, AWS_SES_REGION, EMAIL_FROM in env.
- *
- * Get SMTP credentials from: AWS Console → SES → SMTP Settings → Create SMTP credentials
- * These are DIFFERENT from your regular AWS access keys.
- */
 export async function sendKycEmail({ toEmail, customerName, sessionUrl, expiryHours }) {
   const html = previewEmail(customerName, sessionUrl, expiryHours);
 
-  const region = process.env.AWS_SES_REGION || "ap-south-1";
-  const transporter = nodemailer.createTransport({
-    host: `email-smtp.${region}.amazonaws.com`,
-    port: 587,
-    secure: false,
-    auth: {
-      user: process.env.AWS_SES_SMTP_USER,
-      pass: process.env.AWS_SES_SMTP_PASS,
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error("RESEND_API_KEY not set");
+
+  const fromAddress = process.env.EMAIL_FROM_ADDRESS || "onboarding@resend.dev";
+  const fromName = process.env.EMAIL_FROM_NAME || "Loan Wizard";
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({
+      from: `${fromName} <${fromAddress}>`,
+      to: [toEmail],
+      subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
+      html,
+      text: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
+    }),
   });
 
-  const from = process.env.EMAIL_FROM || `Loan Wizard <${process.env.AWS_SES_SMTP_USER}>`;
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend API ${res.status}: ${body}`);
+  }
 
-  const info = await transporter.sendMail({
-    from,
-    to: toEmail,
-    subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
-    html,
-    text: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
-  });
-
-  return { success: true, messageId: info.messageId };
+  const data = await res.json();
+  return { success: true, messageId: data.id };
 }
