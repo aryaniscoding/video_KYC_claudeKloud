@@ -26,8 +26,8 @@ class CustomerCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     email: EmailStr
     phone: str = Field(..., pattern=r"^\d{10}$", description="10-digit mobile number")
+    pan_number: str | None = Field(default=None, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$", description="10-character PAN")
     product_code: str = Field(default="PL_STANDARD")
-    max_loan_amount: float = Field(default=500000, ge=10000, le=5000000)
     credit_score: int | None = Field(default=None, ge=300, le=900)
     dpd_12m: int | None = None
     dpd_24m: int | None = None
@@ -41,9 +41,9 @@ class CustomerResponse(BaseModel):
     email: str
     phone_last4: str
     phone: str = ""                    # "****3210" — masked display
+    pan_number: str | None = None
     product_code: str
     product: str = ""                  # alias for product_code
-    max_loan_amount: float
     credit_score: int | None
     created_at: datetime
     created_date: str = ""             # "28 Apr 2026" formatted
@@ -87,7 +87,6 @@ class ApplicationDetail(BaseModel):
     employer_name: str | None = None
     job_tenure_years: float | None = None
     loan_purpose: str | None = None
-    requested_amount: float | None = None
     preferred_tenure_months: int | None = None
     existing_emi_monthly: float | None = None
     has_existing_loans: bool | None = None
@@ -122,8 +121,13 @@ class SessionStatusResponse(BaseModel):
     # CV / liveness
     liveness_score: float | None = None
     estimated_age: float | None = None
+    estimated_gender: str | None = None
+    gender_confidence: float | None = None
     age_consistency_score: float | None = None
     face_confidence: float | None = None
+    anti_spoof_score: float | None = None
+    anti_spoof_passed: bool | None = None
+    spoof_type: str | None = None
 
     # Session signals
     geo_risk_score: float | None = None

@@ -53,8 +53,8 @@ QUESTIONS = [
     },
     {
         "index": 6,
-        "text": "How much loan are you looking for, and for how many months?",
-        "fields": ["requested_amount", "preferred_tenure_months"],
+        "text": "Over how many months would you prefer to repay the loan?",
+        "fields": ["preferred_tenure_months"],
     },
     {
         "index": 7,
@@ -183,19 +183,16 @@ Return JSON:
 """,
 
     6: """
-Extract the requested loan amount and preferred tenure from the following spoken response.
+Extract the preferred repayment tenure from the following spoken response.
 
 Transcript: "{transcript}"
 
 Rules:
-- requested_amount: numerical INR amount; normalize "4 lakhs" → 400000
-- preferred_tenure_months: integer number of months; "2 years" → 24, "18 months" → 18
+- preferred_tenure_months: integer number of months; "2 years" → 24, "18 months" → 18, "as short as possible" → 12
 - null if not clearly stated
 
 Return JSON:
 {{
-  "requested_amount": number | null,
-  "requested_amount_confidence": number,
   "preferred_tenure_months": number | null,
   "preferred_tenure_confidence": number
 }}
@@ -292,7 +289,6 @@ def merge_extracted_fields(extracted_all: list[dict]) -> dict:
 
     # Q6
     q6 = extracted_all[6] if len(extracted_all) > 6 else {}
-    merged["requested_amount"] = q6.get("requested_amount")
     merged["preferred_tenure_months"] = q6.get("preferred_tenure_months")
 
     # Q7

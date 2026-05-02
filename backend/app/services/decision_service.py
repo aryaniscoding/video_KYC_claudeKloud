@@ -133,7 +133,13 @@ def run_ml_scoring(features: dict) -> dict:
     else:
         raw_score = float(_lgb_model.predict(feature_vec.reshape(1, -1))[0])
         if _calibrator is not None:
-            pd_score = float(_calibrator.predict_proba([[raw_score]])[0][1])
+            try:
+                # IsotonicRegression uses predict(), not predict_proba()
+                pd_score = float(_calibrator.predict([raw_score])[0])
+                pd_score = max(0.0, min(1.0, pd_score))
+            except Exception as e:
+                logger.warning("Calibrator prediction failed (%s) — using raw score", e)
+                pd_score = raw_score
         else:
             pd_score = raw_score
 
@@ -185,32 +191,105 @@ def _pd_to_risk_band(pd: float) -> str:
 
 # Deterministic offer table: risk_band → income_bucket → rate%
 # LLM never touches these numbers.
+# Rates sourced from real CIBIL-band lending benchmarks (India, 2024).
+# Risk bands map approximately: LOW=800+, MEDIUM_LOW=750-799, MEDIUM_HIGH=700-749,
+# HIGH=650-699 (HITL), VERY_HIGH=<650 (Decline).
 _OFFER_TABLE = {
-    "LOW":         {"rate": 10.5, "processing_fee": 1.5, "max_multiplier": 20},
-    "MEDIUM_LOW":  {"rate": 12.5, "processing_fee": 2.0, "max_multiplier": 15},
-    "MEDIUM_HIGH": {"rate": 15.0, "processing_fee": 2.5, "max_multiplier": 12},
-    "HIGH":        None,   # HITL
-    "VERY_HIGH":   None,   # Decline
+    "personal_loan": {
+        "LOW":         {"rate": 10.50, "processing_fee": 1.0, "max_multiplier": 22},
+        "MEDIUM_LOW":  {"rate": 11.75, "processing_fee": 1.5, "max_multiplier": 18},
+        "MEDIUM_HIGH": {"rate": 14.50, "processing_fee": 2.0, "max_multiplier": 14},
+        "HIGH":        None,
+        "VERY_HIGH":   None,
+    },
+    "vehicle_loan": {
+        "LOW":         {"rate":  8.65, "processing_fee": 0.5, "max_multiplier": 25},
+        "MEDIUM_LOW":  {"rate":  9.25, "processing_fee": 1.0, "max_multiplier": 20},
+        "MEDIUM_HIGH": {"rate": 10.15, "processing_fee": 1.5, "max_multiplier": 15},
+        "HIGH":        None,
+        "VERY_HIGH":   None,
+    },
+    "education_loan": {
+        "LOW":         {"rate":  9.00, "processing_fee": 0.5, "max_multiplier": 30},
+        "MEDIUM_LOW":  {"rate": 10.35, "processing_fee": 1.0, "max_multiplier": 25},
+        "MEDIUM_HIGH": {"rate": 11.50, "processing_fee": 1.5, "max_multiplier": 20},
+        "HIGH":        None,
+        "VERY_HIGH":   None,
+    },
+    "home_loan": {
+        "LOW":         {"rate":  8.25, "processing_fee": 0.5, "max_multiplier": 60},
+        "MEDIUM_LOW":  {"rate":  8.60, "processing_fee": 0.5, "max_multiplier": 50},
+        "MEDIUM_HIGH": {"rate":  9.00, "processing_fee": 1.0, "max_multiplier": 40},
+        "HIGH":        None,
+        "VERY_HIGH":   None,
+    },
+    "business_loan": {
+        "LOW":         {"rate": 14.25, "processing_fee": 1.5, "max_multiplier": 25},
+        "MEDIUM_LOW":  {"rate": 17.00, "processing_fee": 2.0, "max_multiplier": 20},
+        "MEDIUM_HIGH": {"rate": 20.50, "processing_fee": 2.5, "max_multiplier": 15},
+        "HIGH":        None,
+        "VERY_HIGH":   None,
+    },
+}
+
+# Maps loan_purpose string → offer table key
+_PURPOSE_TO_CATEGORY = {
+    "home_loan":          "home_loan",
+    "home_renovation":    "personal_loan",
+    "education":          "education_loan",
+    "vehicle":            "vehicle_loan",
+    "medical":            "personal_loan",
+    "wedding":            "personal_loan",
+    "travel":             "personal_loan",
+    "debt_consolidation": "personal_loan",
+    "business":           "business_loan",
+    "personal":           "personal_loan",
+    "other":              "personal_loan",
 }
 
 _TENURE_OPTIONS = [12, 24, 36]  # months shown in offer
 
 
-def compute_offer(risk_band: str, monthly_income: float, requested_amount: float, max_amount: float) -> dict | None:
-    offer_params = _OFFER_TABLE.get(risk_band)
+def compute_offer(
+    risk_band: str,
+    monthly_income: float,
+    existing_emi: float = 0,
+    preferred_tenure_months: int | None = None,
+    loan_purpose: str | None = None,
+) -> dict | None:
+    category = _PURPOSE_TO_CATEGORY.get(loan_purpose or "", "personal_loan")
+    offer_params = _OFFER_TABLE[category].get(risk_band)
     if not offer_params:
         return None
-
-    # Approved amount = min(requested, max_amount, income × multiplier)
-    max_by_income = monthly_income * offer_params["max_multiplier"]
-    approved_amount = min(requested_amount, max_amount, max_by_income)
-    approved_amount = max(10000, round(approved_amount / 1000) * 1000)  # round to nearest 1000
 
     rate_annual = offer_params["rate"]
     rate_monthly = rate_annual / 12 / 100
 
-    preferred_tenure = int(requested_amount / approved_amount * 12) if approved_amount else 24  # rough estimate
-    recommended_tenure = min(_TENURE_OPTIONS, key=lambda t: abs(t - preferred_tenure))
+    # Honour the user's preferred tenure if given, else default to 24 months
+    preferred = int(preferred_tenure_months) if preferred_tenure_months else 24
+    recommended_tenure = min(_TENURE_OPTIONS, key=lambda t: abs(t - preferred))
+
+    # Approved amount from income × risk-band multiplier
+    income_based_amount = monthly_income * offer_params["max_multiplier"]
+
+    # Min-salary check: monthly_income ≥ (existing_emi + new_emi) × 2
+    # → max affordable EMI = monthly_income / 2 − existing_emi
+    max_affordable_emi = monthly_income / 2 - existing_emi
+    if max_affordable_emi <= 0:
+        return None  # existing obligations already exceed 50% of income
+
+    # Cap by affordability for recommended tenure
+    if rate_monthly > 0:
+        max_by_affordability = (
+            max_affordable_emi
+            * ((1 + rate_monthly) ** recommended_tenure - 1)
+            / (rate_monthly * (1 + rate_monthly) ** recommended_tenure)
+        )
+    else:
+        max_by_affordability = max_affordable_emi * recommended_tenure
+
+    approved_amount = min(income_based_amount, max_by_affordability)
+    approved_amount = max(10000, round(approved_amount / 1000) * 1000)
 
     emi_options = []
     for tenure in _TENURE_OPTIONS:
@@ -229,6 +308,7 @@ def compute_offer(risk_band: str, monthly_income: float, requested_amount: float
     return {
         "approved_amount": approved_amount,
         "interest_rate": rate_annual,
+        "loan_category": category,
         "recommended_tenure_months": recommended_tenure,
         "emi_options": emi_options,
         "processing_fee_pct": offer_params["processing_fee"],
@@ -251,13 +331,15 @@ def build_35_features(
     """
     monthly_income = float(application.get("monthly_income") or 0)
     existing_emi = float(application.get("existing_emi_monthly") or 0)
-    requested_amount = float(application.get("requested_amount") or 0)
     credit_score = float(customer.get("credit_score") or 0)
     total_outstanding = float(customer.get("total_outstanding_inr") or 0)
 
     foir_ratio = existing_emi / monthly_income if monthly_income > 0 else 0
-    lti = requested_amount / monthly_income if monthly_income > 0 else 0
     dti = (existing_emi * 12) / (monthly_income * 12) if monthly_income > 0 else 0
+
+    # post_loan_foir uses existing obligations only (loan amount unknown pre-decision)
+    post_loan_foir = foir_ratio
+    min_required_salary = existing_emi * 2
 
     emp_type_map = {"salaried": 1, "self_employed": 2, "business_owner": 3}
     emp_type_enc = emp_type_map.get(application.get("employment_type"), 0)
@@ -285,15 +367,19 @@ def build_35_features(
         "employer_tier": employer_tier,
         "job_tenure_years": tenure_yrs,
         # Loan Request (4)
-        "requested_amount": requested_amount,
-        "loan_to_income_ratio": round(lti, 4),
+        "requested_amount": 0,
+        "loan_to_income_ratio": 0,
         "preferred_tenure_months": float(application.get("preferred_tenure_months") or 24),
         "loan_purpose_encoded": loan_purpose_enc,
+        "loan_purpose": application.get("loan_purpose"),
         # Liabilities (4)
         "existing_emi_monthly": existing_emi,
-        "total_obligations": existing_emi,
+        "total_obligations": round(existing_emi, 2),
         "foir_ratio": round(foir_ratio, 4),
         "debt_to_income": round(dti, 4),
+        # Post-loan affordability (not model features — used by hard rules only)
+        "post_loan_foir": round(post_loan_foir, 4),
+        "min_required_salary": round(min_required_salary, 2),
         # Pre-session Scores (3)
         "geo_risk_score": float(session.get("geo_risk_score") or 0),
         "ip_risk_score": float(session.get("ip_risk_score") or 0),

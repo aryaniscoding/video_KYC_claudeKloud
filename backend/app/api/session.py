@@ -108,6 +108,9 @@ async def init_session(
     session.geo_risk_score = scores_raw["geo_risk_score"]
     session.ip_risk_score = scores_raw["ip_risk_score"]
     session.device_risk_score = scores_raw["device_risk_score"]
+    session.ip_city = scores_raw.get("ip_city")
+    session.ip_state = scores_raw.get("ip_state")
+    session.ip_zip = scores_raw.get("ip_zip")
 
     # If browser GPS was not granted, fall back to IP-derived coordinates
     if session.latitude is None and scores_raw.get("ip_latitude") is not None:
@@ -141,7 +144,6 @@ async def init_session(
         customer_id=customer.id,
         customer_name=customer.name,
         product_code=session.product_code,
-        max_amount=session.max_amount,
         is_fast_track=session.is_fast_track,
         pre_fill=pre_fill,
         scores=scores,
@@ -166,10 +168,27 @@ async def get_offer(session_id: str, db: AsyncSession = Depends(get_db)):
     if session.status == SessionStatus.DECLINED:
         dec_result = await db.execute(select(Decision).where(Decision.session_id == session.id))
         decision = dec_result.scalar_one_or_none()
+        # Build human-readable decline reason
+        if decision and not decision.hard_rules_passed and decision.failing_rule_reason:
+            decline_reason = decision.failing_rule_reason
+        elif decision and decision.risk_band in ("HIGH", "VERY_HIGH"):
+            pd_pct = f"{decision.pd_score * 100:.1f}%" if decision.pd_score else "high"
+            decline_reason = (
+                f"Our risk model assessed a {pd_pct} probability of default "
+                f"(risk band: {decision.risk_band}). This exceeds our current approval threshold."
+            )
+        else:
+            decline_reason = "Based on the information provided, you do not meet our current eligibility criteria."
         return OfferResponse(
             eligible=False,
-            decline_reason=decision.failing_rule_reason if decision else "Not eligible",
+            decline_reason=decline_reason,
             decline_tips=_get_decline_tips(decision),
+            failing_rule=decision.failing_rule if decision else None,
+            risk_band=decision.risk_band if decision else None,
+            pd_score=decision.pd_score if decision else None,
+            risk_factors=_shap_to_plain_english(
+                decision.top_positive_features if decision else None, mode="risk"
+            ),
         )
 
     if session.status != SessionStatus.APPROVED:
@@ -191,8 +210,10 @@ async def get_offer(session_id: str, db: AsyncSession = Depends(get_db)):
         processing_fee_pct=decision.processing_fee_pct,
         offer_ref_id=decision.offer_ref_id,
         offer_valid_until=decision.offer_valid_until,
-        approval_reasons=_shap_to_plain_english(decision.top_positive_features),
+        approval_reasons=_shap_to_plain_english(decision.top_negative_features, mode="approval"),
+        risk_factors=_shap_to_plain_english(decision.top_positive_features, mode="risk"),
         risk_band=decision.risk_band,
+        pd_score=decision.pd_score,
     )
 
 
@@ -216,31 +237,76 @@ async def download_offer(offer_ref_id: str, db: AsyncSession = Depends(get_db)):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _shap_to_plain_english(top_features: list | None) -> list[str]:
+def _shap_to_plain_english(top_features: list | None, mode: str = "approval") -> list[str]:
     if not top_features:
         return []
-    label_map = {
+    approval_map = {
         "credit_score": "Strong credit history",
         "monthly_income": "Healthy monthly income",
         "foir_ratio": "Low existing debt obligations",
+        "post_loan_foir": "Affordable EMI-to-income ratio",
         "job_tenure_years": "Stable employment tenure",
-        "liveness_score": "Verified identity",
-        "extraction_confidence_avg": "Clear application details",
-        "prior_loan_performance_encoded": "Good repayment history",
+        "liveness_score": "Identity successfully verified",
+        "extraction_confidence_avg": "Clear and consistent application",
+        "prior_loan_performance_encoded": "Good past repayment history",
+        "consent_confidence": "Clear consent given",
+        "age_consistency_score": "Age verified consistently",
     }
+    risk_map = {
+        "credit_score": "Low credit score",
+        "monthly_income": "Insufficient income for requested amount",
+        "foir_ratio": "High existing debt obligations",
+        "post_loan_foir": "Total EMIs would exceed 50% of income",
+        "dpd_12m": "Recent payment defaults (last 12 months)",
+        "dpd_24m": "Payment defaults in last 24 months",
+        "job_tenure_years": "Short employment history",
+        "active_loans_count": "Too many active loans",
+        "total_outstanding_inr": "High outstanding loan balance",
+        "geo_risk_score": "Location mismatch or high-risk area",
+        "ip_risk_score": "Suspicious network detected",
+        "inconsistency_score": "Inconsistencies found in stated information",
+        "prior_rejections_count": "Multiple prior loan rejections",
+        "application_velocity_30d": "Multiple recent loan applications",
+    }
+    label_map = risk_map if mode == "risk" else approval_map
     return [label_map.get(f, f.replace("_", " ").title()) for f in top_features[:3]]
 
 
 def _get_decline_tips(decision) -> list[str]:
-    if not decision or not decision.failing_rule:
-        return []
+    if not decision:
+        return ["Please contact our helpline for assistance."]
+    # ML-based decline (no failing hard rule)
+    if decision.hard_rules_passed and decision.risk_band in ("HIGH", "VERY_HIGH"):
+        tips = ["Improve your CIBIL score by clearing any outstanding dues."]
+        if decision.top_positive_features:
+            feature_tips = {
+                "credit_score": "Work on improving your credit score above 700.",
+                "monthly_income": "Apply for a lower loan amount relative to your income.",
+                "foir_ratio": "Reduce existing EMIs before reapplying.",
+                "post_loan_foir": "Try a smaller loan amount or longer repayment tenure.",
+                "dpd_12m": "Clear all overdue payments and maintain clean repayment for 6 months.",
+                "dpd_24m": "Maintain timely repayments for at least 6 months before reapplying.",
+                "active_loans_count": "Close some existing loans before applying for a new one.",
+                "inconsistency_score": "Ensure all information provided is accurate and consistent.",
+                "prior_rejections_count": "Wait at least 90 days before reapplying.",
+            }
+            for f in decision.top_positive_features[:2]:
+                tip = feature_tips.get(f)
+                if tip:
+                    tips.append(tip)
+        tips.append("Reapply after 90 days for a fresh assessment.")
+        return tips
+    if not decision.failing_rule:
+        return ["Please contact our helpline for assistance."]
     tips_map = {
         "min_age": ["You must be at least 21 years old to apply."],
         "max_age": ["You must be under 65 years old to apply."],
         "min_income": ["Minimum monthly income of ₹15,000 is required.", "Consider applying once your income increases."],
-        "bureau_score": ["Improve your CIBIL score to 650+ by repaying existing dues.", "Check your credit report for errors."],
+        "bureau_score": ["Improve your CIBIL score to 650+ by repaying existing dues.", "Check your credit report for errors at CIBIL.com."],
         "dpd_24m": ["Clear any overdue payments on existing loans.", "Apply again after 6 months of clean repayment."],
         "foir": ["Reduce your existing EMI obligations below 50% of income before applying."],
-        "liveness": ["Please ensure good lighting and a stable internet connection.", "Try again or contact our helpline."],
+        "post_loan_foir": ["Try applying for a smaller loan amount or a longer repayment tenure.", "Reduce existing EMIs first."],
+        "liveness": ["Ensure good lighting and a stable connection.", "Try again or contact our helpline."],
+        "pincode_exclusion": ["We are unable to service your area currently. Check back later."],
     }
     return tips_map.get(decision.failing_rule, ["Please contact our helpline for assistance."])

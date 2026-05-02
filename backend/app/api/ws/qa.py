@@ -165,7 +165,6 @@ async def ws_qa(websocket: WebSocket, session_id: str):
                 employer_name=merged.get("employer_name"),
                 job_tenure_years=merged.get("job_tenure_years"),
                 loan_purpose=merged.get("loan_purpose"),
-                requested_amount=merged.get("requested_amount"),
                 preferred_tenure_months=merged.get("preferred_tenure_months"),
                 existing_emi_monthly=merged.get("existing_emi_monthly", 0.0),
                 has_existing_loans=merged.get("has_existing_loans"),
@@ -184,6 +183,21 @@ async def ws_qa(websocket: WebSocket, session_id: str):
                 logger.info("Created new Application for session %s", session.id)
 
             await db.flush()
+
+            # Re-score geo risk using stated location vs IP-derived location
+            from app.services.scoring_service import compute_location_mismatch_score
+            mismatch = compute_location_mismatch_score(
+                stated_city=merged.get("city"),
+                stated_state=merged.get("state"),
+                stated_pincode=merged.get("pincode"),
+                ip_city=session.ip_city,
+                ip_state=session.ip_state,
+                ip_zip=session.ip_zip,
+            )
+            if mismatch > 0:
+                session.geo_risk_score = round(
+                    min((session.geo_risk_score or 0.0) + mismatch * 0.60, 1.0), 4
+                )
 
             log = AuditLog(
                 session_id=session.id,

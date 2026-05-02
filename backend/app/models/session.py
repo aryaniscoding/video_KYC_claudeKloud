@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Float, DateTime, ForeignKey, Enum as SAEnum, Text
+from sqlalchemy import String, Float, DateTime, ForeignKey, Enum as SAEnum, Text, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
 import enum
@@ -52,11 +52,21 @@ class Session(Base, TimestampMixin):
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     device_fingerprint: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
+    # IP-derived location (from ip-api.com at session init)
+    ip_city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ip_state: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ip_zip: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     # CV signals
     liveness_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     estimated_age: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_gender: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    gender_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     age_consistency_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     face_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anti_spoof_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    anti_spoof_passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    spoof_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Consent
     consent_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

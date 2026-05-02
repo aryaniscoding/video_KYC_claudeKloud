@@ -3,11 +3,15 @@ import { createCustomer } from "@/lib/apiClient";
 
 const PRODUCTS = ["PL_STANDARD", "PL_PREMIUM", "PL_FLEXI", "HL_STANDARD", "BL_SME"];
 
+function validatePAN(pan) {
+  return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan);
+}
+
 export default function AddCustomerModal({ onClose, onAdded }) {
   const [form, setForm] = useState({
     name: "", email: "", phone: "",
+    pan_number: "",
     product_code: "PL_STANDARD",
-    max_loan_amount: 500000,
     credit_score: "",
   });
   const [loading, setLoading] = useState(false);
@@ -18,11 +22,16 @@ export default function AddCustomerModal({ onClose, onAdded }) {
   const submit = async (e) => {
     e.preventDefault();
     setError(null);
+    const pan = form.pan_number.trim().toUpperCase();
+    if (pan && !validatePAN(pan)) {
+      setError("PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).");
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
         ...form,
-        max_loan_amount: Number(form.max_loan_amount),
+        pan_number: pan || null,
         credit_score: form.credit_score ? Number(form.credit_score) : null,
       };
       const customer = await createCustomer(payload);
@@ -69,9 +78,11 @@ export default function AddCustomerModal({ onClose, onAdded }) {
               </select>
             </div>
             <div>
-              <label className="lw-label block mb-1">Max Loan Amount (₹)</label>
-              <input className="lw-input" type="number" min={10000} max={5000000} step={10000}
-                value={form.max_loan_amount} onChange={(e) => set("max_loan_amount", e.target.value)} />
+              <label className="lw-label block mb-1">PAN Number <span className="text-on-surface-variant font-normal">(optional)</span></label>
+              <input className="lw-input uppercase" maxLength={10}
+                value={form.pan_number}
+                onChange={(e) => set("pan_number", e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                placeholder="ABCDE1234F" />
             </div>
           </div>
 

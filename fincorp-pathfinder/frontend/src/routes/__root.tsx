@@ -1,6 +1,4 @@
-import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
-
-import appCss from "../styles.css?url";
+import { Outlet, Link, createRootRoute } from "@tanstack/react-router";
 
 function NotFoundComponent() {
   return (
@@ -25,47 +23,6 @@ function NotFoundComponent() {
 }
 
 export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Loan Wizard — Poonawalla Fincorp" },
-      { name: "description", content: "Video KYC loan origination platform — Poonawalla Fincorp" },
-      { property: "og:title", content: "Loan Wizard — Poonawalla Fincorp" },
-      { property: "og:description", content: "Video KYC loan origination platform — Poonawalla Fincorp" },
-      { property: "og:type", content: "website" },
-      { name: "twitter:title", content: "Loan Wizard — Poonawalla Fincorp" },
-      { name: "twitter:description", content: "Video KYC loan origination platform — Poonawalla Fincorp" },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/2b7507cb-c2c4-4882-902e-94c1485f2024/id-preview-cb4078d7--0cc3aa4b-3e99-4f98-9dca-28b1f753e558.lovable.app-1777539099573.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/2b7507cb-c2c4-4882-902e-94c1485f2024/id-preview-cb4078d7--0cc3aa4b-3e99-4f98-9dca-28b1f753e558.lovable.app-1777539099573.png" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-    links: [
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap" },
-      { rel: "stylesheet", href: appCss },
-    ],
-  }),
-  shellComponent: RootShell,
-  component: RootComponent,
+  component: () => <Outlet />,
   notFoundComponent: NotFoundComponent,
 });
-
-function RootShell({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  );
-}
-
-function RootComponent() {
-  return <Outlet />;
-}

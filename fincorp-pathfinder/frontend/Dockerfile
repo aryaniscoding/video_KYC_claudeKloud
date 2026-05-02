@@ -13,16 +13,18 @@ COPY . .
 ARG VITE_API_BASE_URL
 ARG VITE_WS_BASE_URL
 ARG VITE_EMAIL_SERVER_URL
+ARG VITE_USE_MOCK=false
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_WS_BASE_URL=$VITE_WS_BASE_URL
 ENV VITE_EMAIL_SERVER_URL=$VITE_EMAIL_SERVER_URL
+ENV VITE_USE_MOCK=$VITE_USE_MOCK
 
 RUN npm run build
 
 # ── Stage 2: Serve static files with nginx ────────────────────────────────────
 FROM nginx:1.27-alpine
 
-COPY --from=builder /app/dist/client /usr/share/nginx/html
+COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE ${PORT:-80}

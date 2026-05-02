@@ -79,11 +79,18 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                             session.liveness_score = result_passive.liveness_score
                             session.face_confidence = result_passive.face_confidence
                             session.estimated_age = result_passive.estimated_age
+                            session.estimated_gender = result_passive.estimated_gender
+                            session.gender_confidence = result_passive.gender_confidence
                             session.age_consistency_score = result_passive.age_consistency_score or 0.5
+                            session.anti_spoof_score = result_passive.anti_spoof_score
+                            session.anti_spoof_passed = result_passive.anti_spoof_passed
+                            session.spoof_type = result_passive.spoof_type
                             session.status = SessionStatus.HITL
                             await _log_audit(db, session, "liveness", "hitl_triggered", {
                                 "reason": "liveness_fail",
                                 "liveness_score": result_passive.liveness_score,
+                                "anti_spoof_score": result_passive.anti_spoof_score,
+                                "spoof_type": result_passive.spoof_type,
                             })
                             await db.commit()
                             await websocket.send_json({
@@ -121,7 +128,11 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                         blink_result = await run_blink_challenge(challenge_jpeg, required_blinks=2)
                         final_passive = await run_passive_liveness(frames_jpeg + challenge_jpeg)
 
-                        if not blink_result["challenge_passed"] or final_passive.liveness_score < 0.40:
+                        if (
+                            not blink_result["challenge_passed"]
+                            or final_passive.liveness_score < 0.40
+                            or final_passive.anti_spoof_score < 0.45
+                        ):
                             final_passive.hitl_required = True
                             final_passive.active_challenge_required = False
                             session.status = SessionStatus.HITL
@@ -129,6 +140,8 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                                 "reason": "active_challenge_fail",
                                 "blinks_detected": blink_result["blinks_detected"],
                                 "liveness_score": final_passive.liveness_score,
+                                "anti_spoof_score": final_passive.anti_spoof_score,
+                                "spoof_type": final_passive.spoof_type,
                             })
                         else:
                             final_passive.is_live = True
@@ -167,10 +180,14 @@ def _result_to_dict(r) -> dict:
         "liveness_score": r.liveness_score,
         "is_live": r.is_live,
         "spoof_type": r.spoof_type,
+        "anti_spoof_score": r.anti_spoof_score,
+        "anti_spoof_passed": r.anti_spoof_passed,
         "face_detected": r.face_detected,
         "face_confidence": r.face_confidence,
         "frames_analyzed": r.frames_analyzed,
         "estimated_age": r.estimated_age,
+        "estimated_gender": r.estimated_gender,
+        "gender_confidence": r.gender_confidence,
         "age_range": r.age_range,
         "age_consistency_score": r.age_consistency_score,
         "active_challenge_required": r.active_challenge_required,
@@ -182,13 +199,21 @@ async def _save_liveness(db: AsyncSession, session: Session, result) -> None:
     session.liveness_score = result.liveness_score
     session.face_confidence = result.face_confidence
     session.estimated_age = result.estimated_age
+    session.estimated_gender = result.estimated_gender
+    session.gender_confidence = result.gender_confidence
     session.age_consistency_score = result.age_consistency_score or 0.5
+    session.anti_spoof_score = result.anti_spoof_score
+    session.anti_spoof_passed = result.anti_spoof_passed
+    session.spoof_type = result.spoof_type
     if not result.hitl_required:
         session.status = SessionStatus.CONSENT
     await _log_audit(db, session, "liveness", "liveness_complete", {
         "liveness_score": result.liveness_score,
         "estimated_age": result.estimated_age,
+        "estimated_gender": result.estimated_gender,
         "age_consistency_score": result.age_consistency_score,
+        "anti_spoof_score": result.anti_spoof_score,
+        "anti_spoof_passed": result.anti_spoof_passed,
         "spoof_type": result.spoof_type,
     })
     await db.commit()

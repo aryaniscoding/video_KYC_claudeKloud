@@ -76,6 +76,97 @@ function CardBlock({ title, children }) {
   );
 }
 
+function ExplanationBlock({ data, dec }) {
+  const status = data?.status;
+  if (!status || ["pending", "started", "face_check", "consent", "qa", "processing"].includes(status))
+    return null;
+
+  const lines   = [];   // array of { text, color }
+  const flags   = [];   // warning flags (amber)
+
+  // ── VERDICT ──────────────────────────────────────────────────────────────
+  if (status === "approved") {
+    lines.push({ text: "Application approved — all checks passed.", color: "text-status-green-fg" });
+  } else if (status === "declined") {
+    if (dec && !dec.hard_rules_passed && dec.failing_rule) {
+      lines.push({ text: `Declined by policy rule: "${dec.failing_rule}"`, color: "text-destructive" });
+      if (dec.failing_rule_reason)
+        lines.push({ text: dec.failing_rule_reason, color: "text-destructive/80" });
+    } else if (dec?.risk_band) {
+      lines.push({ text: `Declined by risk model — band: ${dec.risk_band}`, color: "text-destructive" });
+      if (dec.pd_score != null)
+        lines.push({ text: `Probability of default: ${(dec.pd_score * 100).toFixed(1)}% (threshold exceeded)`, color: "text-destructive/80" });
+    } else {
+      lines.push({ text: "Application declined.", color: "text-destructive" });
+    }
+  } else if (status === "hitl") {
+    lines.push({ text: "Referred for manual review — risk band requires human decision.", color: "text-status-amber-fg" });
+    if (dec?.risk_band)
+      lines.push({ text: `Model risk band: ${dec.risk_band} — PD: ${dec.pd_score != null ? (dec.pd_score * 100).toFixed(1) + "%" : "—"}`, color: "text-status-amber-fg/80" });
+  }
+
+  // ── ML SIGNALS ───────────────────────────────────────────────────────────
+  if (dec?.top_positive_features?.length > 0)
+    flags.push(`Risk drivers: ${dec.top_positive_features.join(", ")}`);
+  if (status === "approved" && dec?.top_negative_features?.length > 0)
+    lines.push({ text: `Key approval signals: ${dec.top_negative_features.join(", ")}`, color: "text-status-green-fg/80" });
+
+  // ── AI / LLM SIGNALS ─────────────────────────────────────────────────────
+  const conf = data.extraction_confidence_avg;
+  const inco = data.inconsistency_score;
+  if (conf != null && conf < 0.60)
+    flags.push(`Low AI extraction confidence (${(conf * 100).toFixed(0)}%) — answers may be incomplete or ambiguous`);
+  if (inco != null && inco > 0.45)
+    flags.push(`Inconsistency detected in answers (score ${inco.toFixed(2)}) — stated facts contradict each other`);
+  if (data.hesitation_count > 3)
+    flags.push(`High hesitation count (${data.hesitation_count} pauses) — may indicate coached or uncertain responses`);
+
+  // ── GEO / NETWORK SIGNALS ────────────────────────────────────────────────
+  if ((data.geo_risk_score ?? 0) > 0.55)
+    flags.push(`Location mismatch — stated address does not match IP-derived location (geo risk ${data.geo_risk_score?.toFixed(2)})`);
+  if ((data.ip_risk_score ?? 0) > 0.35)
+    flags.push(`Suspicious network — VPN, Tor, or datacenter IP detected (IP risk ${data.ip_risk_score?.toFixed(2)})`);
+
+  // ── BIOMETRICS ───────────────────────────────────────────────────────────
+  if ((data.liveness_score ?? 1) < 0.40)
+    flags.push(`Low liveness score (${data.liveness_score?.toFixed(2)}) — face check inconclusive`);
+  if ((data.anti_spoof_score ?? 1) < 0.45)
+    flags.push(`Anti-spoof score is low (${data.anti_spoof_score?.toFixed(2)})${data.spoof_type ? ` — suspected ${data.spoof_type.replace("_", " ")}` : ""}`);
+
+  const borderColor =
+    status === "approved" ? "border-status-green-fg/40 bg-status-green-bg/60"
+    : status === "hitl"   ? "border-status-amber-fg/40 bg-status-amber-bg/60"
+    :                       "border-destructive/30 bg-destructive/5";
+
+  return (
+    <div className={`rounded-lg border-2 p-4 mb-4 ${borderColor}`}>
+      <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+        Decision Explanation
+      </p>
+
+      {/* Verdict lines */}
+      <div className="space-y-1 mb-3">
+        {lines.map((l, i) => (
+          <p key={i} className={`text-sm font-medium ${l.color}`}>{l.text}</p>
+        ))}
+      </div>
+
+      {/* Warning flags */}
+      {flags.length > 0 && (
+        <div className="space-y-1.5 pt-3 border-t border-border/30">
+          <p className="text-xs text-on-surface-variant uppercase tracking-wide mb-1">Contributing Signals</p>
+          {flags.map((f, i) => (
+            <div key={i} className="flex gap-2 items-start text-xs">
+              <span className="text-status-amber-fg mt-0.5 shrink-0">▸</span>
+              <span className="text-on-surface">{f}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ColSection({ title, children }) {
   return (
     <div className="p-5 border-b border-border last:border-0">
@@ -200,8 +291,8 @@ export default function SessionStatusDrawer({ customer, onClose }) {
                   <CardBlock title="Identity">
                     <Row label="Full Name"     value={app?.full_name}    />
                     <Row label="Date of Birth" value={app?.dob}          />
-                    <Row label="Credit Score"  value={customer.credit_score} />
-                    <Row label="Max Pre-approved" value={INR(customer.max_loan_amount)} valueClass="text-status-green-fg" />
+                    <Row label="Credit Score" value={customer.credit_score} />
+                    <Row label="PAN Number"   value={customer.pan_number || "—"} mono />
                   </CardBlock>
                   <CardBlock title="Address">
                     <Row label="Street"  value={app?.address_line} />
@@ -270,8 +361,9 @@ export default function SessionStatusDrawer({ customer, onClose }) {
               <div className="overflow-y-auto">
 
                 {/* Decision */}
-                {dec && (
+                {(dec || ["approved","declined","hitl"].includes(data.status)) && (
                   <ColSection title="Decision Breakdown">
+                    <ExplanationBlock data={data} dec={dec} />
                     <CardBlock title="Layer 1 — Hard Rules">
                       <Row
                         label="Rules Passed"
@@ -345,7 +437,7 @@ export default function SessionStatusDrawer({ customer, onClose }) {
 
                 {/* Biometrics */}
                 <ColSection title="Biometrics &amp; Identity Verification">
-                  <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
                     <div className="lw-card p-3 text-center">
                       <p className="text-xs text-on-surface-variant mb-1">Liveness</p>
                       <p className={`text-2xl font-bold ${data.liveness_score > 0.7 ? "text-status-green-fg" : data.liveness_score > 0.4 ? "text-status-amber-fg" : "text-destructive"}`}>
@@ -353,8 +445,29 @@ export default function SessionStatusDrawer({ customer, onClose }) {
                       </p>
                     </div>
                     <div className="lw-card p-3 text-center">
+                      <p className="text-xs text-on-surface-variant mb-1">Anti-Spoof</p>
+                      <p className={`text-2xl font-bold ${data.anti_spoof_score > 0.7 ? "text-status-green-fg" : data.anti_spoof_score > 0.5 ? "text-status-amber-fg" : "text-destructive"}`}>
+                        {data.anti_spoof_score != null ? data.anti_spoof_score.toFixed(2) : "—"}
+                      </p>
+                      <p className={`text-xs mt-1 ${data.anti_spoof_passed ? "text-status-green-fg" : "text-destructive"}`}>
+                        {data.anti_spoof_passed == null ? "—" : data.anti_spoof_passed ? "Passed" : "Failed"}
+                      </p>
+                      {data.spoof_type && (
+                        <p className="text-xs text-destructive mt-1">
+                          {data.spoof_type.replace("_", " ")}
+                        </p>
+                      )}
+                    </div>
+                    <div className="lw-card p-3 text-center">
                       <p className="text-xs text-on-surface-variant mb-1">Est. Age</p>
                       <p className="text-2xl font-bold">{data.estimated_age != null ? `${Math.round(data.estimated_age)}` : "—"}</p>
+                    </div>
+                    <div className="lw-card p-3 text-center">
+                      <p className="text-xs text-on-surface-variant mb-1">Est. Gender</p>
+                      <p className="text-xl font-bold capitalize">{data.estimated_gender || "—"}</p>
+                      <p className="text-xs text-on-surface-variant mt-1">
+                        {data.gender_confidence != null ? `${Math.round(data.gender_confidence * 100)}% confidence` : "—"}
+                      </p>
                     </div>
                     <div className="lw-card p-3 text-center">
                       <p className="text-xs text-on-surface-variant mb-1">Face Conf.</p>

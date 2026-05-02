@@ -18,6 +18,7 @@ class Customer(Base, TimestampMixin):
     # Aadhaar hash (optional — for prior-history lookup)
     aadhaar_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    pan_number: Mapped[str | None] = mapped_column(String(10), nullable=True)
     product_code: Mapped[str] = mapped_column(String(32), nullable=False, default="PL_STANDARD")
     max_loan_amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=500000)
 

@@ -9,6 +9,7 @@ Blink detection: EyesOpen transitions across sampled challenge frames.
 import asyncio
 import logging
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -50,6 +51,7 @@ class FrameResult:
     bbox: list[float] | None
     estimated_age: float | None
     gender: str | None
+    gender_confidence: float | None = None
     pose_yaw: float | None = None
     pose_pitch: float | None = None
     eyes_open: bool | None = None
@@ -66,7 +68,11 @@ class LivenessResult:
     frames_analyzed: int
     estimated_age: float | None
     age_range: str | None
+    estimated_gender: str | None
+    gender_confidence: float | None
     age_consistency_score: float | None
+    anti_spoof_score: float
+    anti_spoof_passed: bool
     active_challenge_required: bool
     hitl_required: bool
 
@@ -107,6 +113,15 @@ async def analyze_frame(jpeg_bytes: bytes, frame_index: int) -> FrameResult:
     age_high = face.get("AgeRange", {}).get("High", 35)
     bb       = face.get("BoundingBox", {})
     pose     = face.get("Pose", {})
+    gender_obj = face.get("Gender", {}) or {}
+    gender_val = gender_obj.get("Value")
+    if gender_val == "Male":
+        gender = "male"
+    elif gender_val == "Female":
+        gender = "female"
+    else:
+        gender = None
+    gender_conf = gender_obj.get("Confidence")
 
     return FrameResult(
         frame_index=frame_index,
@@ -114,7 +129,8 @@ async def analyze_frame(jpeg_bytes: bytes, frame_index: int) -> FrameResult:
         face_confidence=round(face.get("Confidence", 0) / 100.0, 4),
         bbox=[bb.get("Left", 0), bb.get("Top", 0), bb.get("Width", 0), bb.get("Height", 0)],
         estimated_age=round((age_low + age_high) / 2.0, 1),
-        gender="M" if face.get("Gender", {}).get("Value") == "Male" else "F",
+        gender=gender,
+        gender_confidence=round(gender_conf / 100.0, 4) if isinstance(gender_conf, (int, float)) else None,
         pose_yaw=pose.get("Yaw"),
         pose_pitch=pose.get("Pitch"),
         eyes_open=face.get("EyesOpen", {}).get("Value", True),
@@ -129,46 +145,78 @@ def compute_liveness_score(frame_results: list[FrameResult]) -> dict:
     detection_ratio = len(detected) / max(len(frame_results), 1)
 
     if detection_ratio < 0.5:
-        return {"liveness_score": 0.0, "spoof_type": "face_not_detected",
-                "face_detected": False, "face_confidence": 0.0}
+        return {
+            "liveness_score": 0.0,
+            "anti_spoof_score": 0.0,
+            "anti_spoof_passed": False,
+            "spoof_type": "face_not_detected",
+            "face_detected": False,
+            "face_confidence": 0.0,
+        }
 
     confidence_mean = float(np.mean([r.face_confidence for r in detected]))
 
-    # Head-pose yaw variance — live faces drift naturally; printed photos are static
+    # Eyes-open ratio — photos/printouts typically have fixed eye state
+    eyes_open_ratio = 1.0
+    eyes_vals = [r.eyes_open for r in detected if r.eyes_open is not None]
+    if eyes_vals:
+        eyes_open_ratio = float(sum(eyes_vals) / len(eyes_vals))
+
+    # Image sharpness — blurry/frozen replay frames score lower (Rekognition: 0–100)
+    sharpness_vals = [r.sharpness for r in detected if r.sharpness is not None]
+    sharpness_score = 0.6  # neutral default
+    if sharpness_vals:
+        sharpness_score = min(float(np.mean(sharpness_vals)) / 70.0, 1.0)
+
+    # Pose yaw variance — only penalises truly static captures; sitting still is normal
     yaw_vals = [r.pose_yaw for r in detected if r.pose_yaw is not None]
-    pose_var_score = 0.5
+    pose_var_score = 0.65  # generous default — benefit of the doubt for still users
     if len(yaw_vals) >= 3:
         yaw_std = float(np.std(yaw_vals))
-        if yaw_std < 0.5:
-            pose_var_score = 0.1   # completely static → likely photo/replay
-        elif yaw_std < 2.0:
-            pose_var_score = 0.5
+        if yaw_std < 0.2:
+            pose_var_score = 0.2   # completely frozen frame (photo / screen replay)
+        elif yaw_std < 1.0:
+            pose_var_score = 0.55  # natural stillness — do not penalise heavily
         else:
-            pose_var_score = min(yaw_std / 10.0, 1.0)
+            pose_var_score = min(0.55 + yaw_std / 15.0, 1.0)
 
-    # BBox area variance — natural head movement changes face size slightly
-    bbox_areas = [r.bbox[2] * r.bbox[3] for r in detected if r.bbox]
-    bbox_var_score = 0.5
-    if len(bbox_areas) >= 3:
-        area_cv = float(np.std(bbox_areas) / (np.mean(bbox_areas) + 1e-6))
-        bbox_var_score = min(area_cv * 10, 1.0)
+    anti_spoof_score = round(min(
+        detection_ratio * 0.20
+        + confidence_mean * 0.25
+        + eyes_open_ratio * 0.20
+        + sharpness_score * 0.15
+        + pose_var_score * 0.20,
+        1.0,
+    ), 4)
+    anti_spoof_passed = anti_spoof_score >= 0.60
 
+    # Liveness blends active-face signals with anti-spoof confidence.
     liveness_score = round(min(
-        detection_ratio  * 0.25
-        + confidence_mean  * 0.25
-        + pose_var_score   * 0.30
-        + bbox_var_score   * 0.20,
+        detection_ratio * 0.25
+        + confidence_mean * 0.20
+        + eyes_open_ratio * 0.15
+        + sharpness_score * 0.10
+        + pose_var_score * 0.10
+        + anti_spoof_score * 0.20,
         1.0,
     ), 4)
 
     spoof_type = None
-    if liveness_score < 0.40:
+    if anti_spoof_score < 0.35:
         spoof_type = "print_or_replay"
-    elif pose_var_score < 0.2:
+    elif sharpness_score < 0.35:
+        spoof_type = "screen_replay"
+    elif pose_var_score <= 0.2:
         spoof_type = "static_photo"
 
-    return {"liveness_score": liveness_score, "spoof_type": spoof_type,
-            "face_detected": True, "face_confidence": round(confidence_mean, 4)}
+    return {
+        "liveness_score": liveness_score,
+        "anti_spoof_score": anti_spoof_score,
+        "anti_spoof_passed": anti_spoof_passed and spoof_type is None,
+        "spoof_type": spoof_type,
+        "face_detected": True,
+        "face_confidence": round(confidence_mean, 4),
+    }
 
 
 def estimate_age_stats(frame_results: list[FrameResult]) -> dict:
@@ -180,6 +228,21 @@ def estimate_age_stats(frame_results: list[FrameResult]) -> dict:
         "estimated_age": round(median_age, 1),
         "age_range": f"{int(median_age - 3)}–{int(median_age + 3)}",
     }
+
+
+def estimate_gender_stats(frame_results: list[FrameResult]) -> dict:
+    genders = [r.gender for r in frame_results if r.face_detected and r.gender in ("male", "female")]
+    if not genders:
+        return {"estimated_gender": None, "gender_confidence": None}
+
+    most_common_gender, _ = Counter(genders).most_common(1)[0]
+    conf_vals = [
+        r.gender_confidence
+        for r in frame_results
+        if r.face_detected and r.gender == most_common_gender and r.gender_confidence is not None
+    ]
+    gender_confidence = round(float(np.mean(conf_vals)), 4) if conf_vals else None
+    return {"estimated_gender": most_common_gender, "gender_confidence": gender_confidence}
 
 
 def compute_age_consistency(estimated_age: float | None, declared_age: float | None) -> float:
@@ -226,20 +289,30 @@ async def run_passive_liveness(
 
     scores        = compute_liveness_score(frame_results)
     age_stats     = estimate_age_stats(frame_results)
+    gender_stats  = estimate_gender_stats(frame_results)
     age_consistency = compute_age_consistency(age_stats.get("estimated_age"), declared_age)
 
     liveness_score = scores["liveness_score"]
+    anti_spoof_score = scores["anti_spoof_score"]
+    anti_spoof_passed = scores["anti_spoof_passed"]
+    spoof_type = scores.get("spoof_type")
+    active_challenge_required = (0.40 <= liveness_score < 0.75) or (0.45 <= anti_spoof_score < 0.60)
+    hitl_required = (liveness_score < 0.40) or (anti_spoof_score < 0.45 and spoof_type is not None)
 
     return LivenessResult(
         liveness_score=liveness_score,
-        is_live=liveness_score >= 0.75,
-        spoof_type=scores.get("spoof_type"),
+        is_live=liveness_score >= 0.75 and anti_spoof_passed,
+        spoof_type=spoof_type,
         face_detected=scores["face_detected"],
         face_confidence=scores["face_confidence"],
         frames_analyzed=len(frames_jpeg),
         estimated_age=age_stats.get("estimated_age"),
         age_range=age_stats.get("age_range"),
+        estimated_gender=gender_stats.get("estimated_gender"),
+        gender_confidence=gender_stats.get("gender_confidence"),
         age_consistency_score=age_consistency,
-        active_challenge_required=0.40 <= liveness_score < 0.75,
-        hitl_required=liveness_score < 0.40,
+        anti_spoof_score=anti_spoof_score,
+        anti_spoof_passed=anti_spoof_passed,
+        active_challenge_required=active_challenge_required,
+        hitl_required=hitl_required,
     )

@@ -103,7 +103,6 @@ async def node_form_assembly(state: PipelineState) -> PipelineState:
             "employment_type": application.employment_type,
             "employer_name": application.employer_name,
             "job_tenure_years": application.job_tenure_years,
-            "requested_amount": application.requested_amount,
             "preferred_tenure_months": application.preferred_tenure_months,
             "existing_emi_monthly": application.existing_emi_monthly,
             "loan_purpose": application.loan_purpose,
@@ -169,23 +168,15 @@ async def node_ml_scoring(state: PipelineState) -> PipelineState:
 # ── Node: offer_matrix ─────────────────────────────────────────────────────────
 
 async def node_offer_matrix(state: PipelineState) -> PipelineState:
-    from app.database import AsyncSessionLocal
-    from app.models import Session
-    from sqlalchemy import select
     from app.services.decision_service import compute_offer
-
-    # Fetch max_amount from session
-    async with AsyncSessionLocal() as db:
-        sess_r = await db.execute(select(Session).where(Session.id == uuid.UUID(state["session_id"])))
-        session = sess_r.scalar_one()
-        max_amount = float(session.max_amount)
 
     features = state["features"]
     offer = compute_offer(
         risk_band=state["risk_band"],
         monthly_income=features.get("monthly_income", 0),
-        requested_amount=features.get("requested_amount", 0),
-        max_amount=max_amount,
+        existing_emi=features.get("existing_emi_monthly", 0),
+        preferred_tenure_months=features.get("preferred_tenure_months"),
+        loan_purpose=features.get("loan_purpose"),
     )
     state["offer"] = offer
     state["approved_amount"] = offer["approved_amount"] if offer else None

@@ -47,6 +47,13 @@ rules:
     value: 0.50
     reason: "Your existing loan EMIs exceed 50% of your income. Reduce outstanding obligations and reapply."
 
+  - id: post_loan_foir
+    description: "Total EMIs (existing + new loan) must not exceed 50% of income. Equivalently: salary must be ≥ 2× total obligations."
+    field: post_loan_foir
+    operator: lte
+    value: 0.50
+    reason: "Adding this loan would push your total EMIs above 50% of your monthly income. Your salary must be at least twice your combined EMI obligations. Try a lower loan amount or longer tenure."
+
   - id: pincode_exclusion
     description: Applicant pincode must not be in the exclusion list
     field: pincode

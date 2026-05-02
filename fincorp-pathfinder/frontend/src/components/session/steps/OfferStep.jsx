@@ -93,14 +93,31 @@ export default function OfferStep({ offer }) {
         </p>
       </div>
 
-      <div className="lw-card p-5 mb-6">
+      <div className="lw-card p-5 mb-4">
         <p className="lw-label mb-3">Why you were approved</p>
         <ul className="space-y-2 text-sm">
-          {offer.approval_reasons.map((r, i) => (
+          {(offer.approval_reasons || []).map((r, i) => (
             <li key={i} className="flex gap-2"><span className="text-amber">▸</span>{r}</li>
           ))}
         </ul>
+        {offer.pd_score != null && (
+          <p className="text-xs text-on-surface-variant mt-3">
+            Risk score: <span className="font-medium text-on-surface">{(offer.pd_score * 100).toFixed(1)}% PD</span>
+            {offer.risk_band && <span className="ml-2 px-1.5 py-0.5 rounded bg-surface-container-high text-xs">{offer.risk_band.replace("_", " ")}</span>}
+          </p>
+        )}
       </div>
+
+      {offer.risk_factors?.length > 0 && (
+        <div className="lw-card p-5 mb-6">
+          <p className="lw-label mb-3">Areas to improve for future applications</p>
+          <ul className="space-y-2 text-sm">
+            {offer.risk_factors.map((f, i) => (
+              <li key={i} className="flex gap-2"><span className="text-on-surface-variant">◦</span>{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <p className="text-sm text-on-surface-variant mb-6">
         Offer valid until: <span className="text-on-surface font-medium">{fmtDate(offer.offer_valid_until)}</span>

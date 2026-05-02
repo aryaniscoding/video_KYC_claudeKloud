@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 # ── Session init (returned after JWT validation) ──────────────────────────────
@@ -34,7 +34,6 @@ class SessionInitResponse(BaseModel):
     customer_id: uuid.UUID
     customer_name: str
     product_code: str
-    max_amount: float
     is_fast_track: bool
     pre_fill: dict | None = None          # name/DOB/address if fast-track
     scores: PreSessionScores
@@ -49,10 +48,14 @@ class LivenessResult(BaseModel):
     liveness_score: float
     is_live: bool
     spoof_type: str | None = None
+    anti_spoof_score: float
+    anti_spoof_passed: bool
     face_detected: bool
     face_confidence: float
     frames_analyzed: int
     estimated_age: float | None = None
+    estimated_gender: str | None = None
+    gender_confidence: float | None = None
     age_range: str | None = None
     age_consistency_score: float | None = None
     active_challenge_required: bool = False
@@ -95,10 +98,13 @@ class OfferResponse(BaseModel):
     processing_fee_pct: float | None = None
     offer_ref_id: uuid.UUID | None = None
     offer_valid_until: datetime | None = None
-    approval_reasons: list[str] | None = None   # plain-English SHAP top 3
+    approval_reasons: list[str] | None = None   # plain-English SHAP approval signals
+    risk_factors: list[str] | None = None        # plain-English SHAP risk drivers
     decline_reason: str | None = None
     decline_tips: list[str] | None = None
+    failing_rule: str | None = None
     risk_band: str | None = None
+    pd_score: float | None = None
 
 
 class DownloadURLResponse(BaseModel):

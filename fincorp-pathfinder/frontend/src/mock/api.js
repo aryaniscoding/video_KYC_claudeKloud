@@ -24,7 +24,6 @@ export const getSession = async (token) => {
     customer_id: "b21a7c6d-mock-0001",
     customer_name: "Ramesh Kumar",
     product_code: "PL_STANDARD",
-    max_amount: 500000,
     is_fast_track: false,
     pre_fill: null,
     scores: {

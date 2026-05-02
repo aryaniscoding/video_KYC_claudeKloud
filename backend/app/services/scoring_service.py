@@ -167,12 +167,60 @@ async def compute_pre_session_scores(
         "hard_stop_reason": None,
         "ip_latitude": ip_flags.get("ip_latitude"),
         "ip_longitude": ip_flags.get("ip_longitude"),
+        "ip_city": ip_flags.get("ip_city"),
+        "ip_state": ip_flags.get("ip_state"),
+        "ip_zip": ip_flags.get("ip_zip"),
     }
 
 
 def update_geo_risk_with_pincode(geo_risk_score: float, pincode: str) -> float:
     """Called after Q&A extracts pincode. Re-computes pincode_risk_tier component."""
     pincode_risk_tier = 1.0 if pincode in _EXCLUDED_PINCODES else 0.0
-    # Add pincode contribution (0.40 weight) without changing city component
     updated = min(geo_risk_score + pincode_risk_tier * 0.40, 1.0)
     return round(updated, 4)
+
+
+def compute_location_mismatch_score(
+    stated_city: str | None,
+    stated_state: str | None,
+    stated_pincode: str | None,
+    ip_city: str | None,
+    ip_state: str | None,
+    ip_zip: str | None,
+) -> float:
+    """
+    Compares user's stated location (from Q&A) against IP-derived location.
+    Returns a mismatch risk score 0.0–1.0.
+
+    Weights:
+      state mismatch  × 0.40  (strongest signal — state is hard to fake accidentally)
+      city mismatch   × 0.35
+      zip prefix mis  × 0.25  (first 3 digits of Indian pincode = district)
+    """
+    if not any([ip_city, ip_state, ip_zip]):
+        return 0.0  # no IP data to compare against
+
+    def _fuzzy_no_match(a: str | None, b: str | None) -> bool:
+        if not a or not b:
+            return False  # missing data → don't penalise
+        a, b = a.strip().lower(), b.strip().lower()
+        return a not in b and b not in a
+
+    state_mismatch = 1.0 if _fuzzy_no_match(stated_state, ip_state) else 0.0
+    city_mismatch  = 1.0 if _fuzzy_no_match(stated_city, ip_city) else 0.0
+
+    zip_mismatch = 0.0
+    if stated_pincode and ip_zip and len(stated_pincode) >= 3 and len(ip_zip) >= 3:
+        if stated_pincode[:3] != ip_zip[:3]:
+            zip_mismatch = 1.0
+
+    score = state_mismatch * 0.40 + city_mismatch * 0.35 + zip_mismatch * 0.25
+
+    if score > 0:
+        logger.warning(
+            "Location mismatch — stated: %s/%s/%s  IP-derived: %s/%s/%s  score=%.2f",
+            stated_city, stated_state, stated_pincode,
+            ip_city, ip_state, ip_zip, score,
+        )
+
+    return round(min(score, 1.0), 4)
