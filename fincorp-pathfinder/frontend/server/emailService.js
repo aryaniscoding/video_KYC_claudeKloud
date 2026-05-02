@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import nodemailer from "nodemailer";
+import * as SibApiV3Sdk from "@getbrevo/brevo";
 import dotenv from "dotenv";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,37 +18,31 @@ export function previewEmail(customerName, sessionUrl, expiryHours) {
 }
 
 /**
- * Send a KYC session email to a customer.
- *
- * @param {Object} opts
- * @param {string} opts.toEmail      — recipient address
- * @param {string} opts.customerName — name shown in the greeting
- * @param {string} opts.sessionUrl   — one-time KYC link
- * @param {number} opts.expiryHours  — hours until the link expires
- * @returns {Promise<{ success: true, messageId: string }>}
+ * Send a KYC session email via Brevo HTTP API (avoids SMTP port blocks on Railway).
+ * Set BREVO_API_KEY in Railway Variables — use the same key shown on Brevo SMTP & API page.
+ * Set EMAIL_FROM_NAME and EMAIL_FROM_ADDRESS for the sender identity.
  */
 export async function sendKycEmail({ toEmail, customerName, sessionUrl, expiryHours }) {
   const html = previewEmail(customerName, sessionUrl, expiryHours);
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: Number(process.env.EMAIL_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+  const apiKey = process.env.BREVO_API_KEY || process.env.EMAIL_PASS;
+  if (!apiKey) {
+    throw new Error("BREVO_API_KEY not set");
+  }
 
-  const from = process.env.EMAIL_FROM || "Loan Wizard <noreply@loanwizard.in>";
+  const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+  apiInstance.authentications["api-key"].apiKey = apiKey;
 
-  const info = await transporter.sendMail({
-    from,
-    to: toEmail,
-    subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
-    html,
-    text: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
-  });
+  const fromName = process.env.EMAIL_FROM_NAME || "Loan Wizard";
+  const fromAddress = process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER || "noreply@example.com";
 
-  return { success: true, messageId: info.messageId };
+  const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
+  sendSmtpEmail.subject = "Your Video KYC Link — Poonawalla Fincorp Personal Loan";
+  sendSmtpEmail.htmlContent = html;
+  sendSmtpEmail.sender = { name: fromName, email: fromAddress };
+  sendSmtpEmail.to = [{ email: toEmail, name: customerName }];
+  sendSmtpEmail.textContent = `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`;
+
+  const data = await apiInstance.sendTransacEmail(sendSmtpEmail);
+  return { success: true, messageId: data.body?.messageId || data.messageId || "sent" };
 }
