@@ -88,6 +88,8 @@ class Session(Base, TimestampMixin):
 
     # S3 paths
     recording_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    liveness_frame_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    consent_recording_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     customer: Mapped["Customer"] = relationship(back_populates="sessions")
     application: Mapped["Application | None"] = relationship(back_populates="session", uselist=False)

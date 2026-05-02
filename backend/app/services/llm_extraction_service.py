@@ -38,7 +38,7 @@ QUESTIONS = [
     },
     {
         "index": 3,
-        "text": "What is your monthly take-home income or revenue?",
+        "text": "What is your monthly take-home salary after tax?",
         "fields": ["monthly_income"],
     },
     {
@@ -53,8 +53,8 @@ QUESTIONS = [
     },
     {
         "index": 6,
-        "text": "Over how many months would you prefer to repay the loan?",
-        "fields": ["preferred_tenure_months"],
+        "text": "How much loan are you looking for, and for how many months?",
+        "fields": ["requested_amount", "preferred_tenure_months"],
     },
     {
         "index": 7,
@@ -183,16 +183,18 @@ Return JSON:
 """,
 
     6: """
-Extract the preferred repayment tenure from the following spoken response.
+Extract the requested loan amount and preferred repayment tenure from the following spoken response.
 
 Transcript: "{transcript}"
 
 Rules:
-- preferred_tenure_months: integer number of months; "2 years" → 24, "18 months" → 18, "as short as possible" → 12
-- null if not clearly stated
+- requested_amount: loan amount in Indian Rupees; normalize spoken amounts: "5 lakh" → 500000, "2.5 lakh" → 250000, "10 thousand" → 10000; null if not mentioned
+- preferred_tenure_months: integer number of months; "2 years" → 24, "18 months" → 18, "as short as possible" → 12; null if not clearly stated
 
 Return JSON:
 {{
+  "requested_amount": number | null,
+  "requested_amount_confidence": number,
   "preferred_tenure_months": number | null,
   "preferred_tenure_confidence": number
 }}
@@ -289,6 +291,7 @@ def merge_extracted_fields(extracted_all: list[dict]) -> dict:
 
     # Q6
     q6 = extracted_all[6] if len(extracted_all) > 6 else {}
+    merged["requested_amount"] = q6.get("requested_amount")
     merged["preferred_tenure_months"] = q6.get("preferred_tenure_months")
 
     # Q7

@@ -30,6 +30,7 @@ from app.schemas.admin import (
 )
 from app.services.jwt_service import create_admin_token, create_session_token
 from app.services.email_service import send_kyc_link_email
+from app.services.s3_service import generate_presigned_url
 from passlib.context import CryptContext
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -75,7 +76,7 @@ _STATUS_LABEL = {
     "processing": "Processing",
     "approved": "Approved",
     "declined": "Declined",
-    "hitl": "HITL",
+    "hitl": "Manual Review",
     "expired": "Expired",
     "dropped": "Dropped",
 }
@@ -342,12 +343,21 @@ async def get_session_status(
             emi_options=dec.emi_options,
         )
 
+    liveness_frame_url = None
+    if session.liveness_frame_key:
+        liveness_frame_url = generate_presigned_url(
+            session.liveness_frame_key,
+            bucket=settings.s3_bucket_frames,
+            expires_seconds=3600,
+        )
+
     return SessionStatusResponse(
         session_id=session.token_jti,
         customer_name=customer.name,
         status=session.status.value,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        liveness_frame_url=liveness_frame_url,
         liveness_score=session.liveness_score,
         estimated_age=session.estimated_age,
         estimated_gender=session.estimated_gender,

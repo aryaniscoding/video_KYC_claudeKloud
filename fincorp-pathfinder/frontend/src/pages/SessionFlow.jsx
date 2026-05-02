@@ -3,10 +3,12 @@ import ProgressBar from "@/components/session/ProgressBar";
 import WelcomeStep from "@/components/session/steps/WelcomeStep";
 import LivenessStep from "@/components/session/steps/LivenessStep";
 import ConsentStep from "@/components/session/steps/ConsentStep";
+import PanStep from "@/components/session/steps/PanStep";
 import QAStep from "@/components/session/steps/QAStep";
 import ProcessingStep from "@/components/session/steps/ProcessingStep";
 import OfferStep from "@/components/session/steps/OfferStep";
 import DeclinedStep from "@/components/session/steps/DeclinedStep";
+import ManualReviewStep from "@/components/session/steps/ManualReviewStep";
 import ExpiredStep from "@/components/session/steps/ExpiredStep";
 import DemoBadge from "@/components/DemoBadge";
 import { getSession } from "@/lib/apiClient";
@@ -74,7 +76,7 @@ export default function SessionFlow({ token }) {
 
   // Stop camera when entering processing/offer/declined/expired or unmount
   useEffect(() => {
-    if (["processing", "offer", "declined", "expired", "error"].includes(step)) {
+    if (["processing", "offer", "declined", "review", "expired", "error"].includes(step)) {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -136,8 +138,11 @@ export default function SessionFlow({ token }) {
           session={session}
           cameraStream={cameraStream}
           setCameraStream={setCameraStream}
-          onComplete={() => setStep("consent")}
+          onComplete={() => setStep("pan")}
         />
+      )}
+      {step === "pan" && session && (
+        <PanStep session={session} onComplete={() => setStep("consent")} />
       )}
       {step === "consent" && session && (
         <ConsentStep
@@ -163,6 +168,7 @@ export default function SessionFlow({ token }) {
       )}
       {step === "offer" && offer && <OfferStep offer={offer} />}
       {step === "declined" && <DeclinedStep result={offer} />}
+      {step === "review" && <ManualReviewStep />}
       {step === "expired" && <ExpiredStep />}
       {step === "error" && (
         <div className="max-w-md mx-auto p-12 text-center">

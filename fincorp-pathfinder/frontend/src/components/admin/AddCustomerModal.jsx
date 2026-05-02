@@ -1,18 +1,9 @@
 import React, { useState } from "react";
 import { createCustomer } from "@/lib/apiClient";
 
-const PRODUCTS = ["PL_STANDARD", "PL_PREMIUM", "PL_FLEXI", "HL_STANDARD", "BL_SME"];
-
-function validatePAN(pan) {
-  return /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan);
-}
-
 export default function AddCustomerModal({ onClose, onAdded }) {
   const [form, setForm] = useState({
-    name: "", email: "", phone: "",
-    pan_number: "",
-    product_code: "PL_STANDARD",
-    credit_score: "",
+    name: "", email: "", phone: "", credit_score: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -22,20 +13,14 @@ export default function AddCustomerModal({ onClose, onAdded }) {
   const submit = async (e) => {
     e.preventDefault();
     setError(null);
-    const pan = form.pan_number.trim().toUpperCase();
-    if (pan && !validatePAN(pan)) {
-      setError("PAN must be 10 characters: 5 letters, 4 digits, 1 letter (e.g. ABCDE1234F).");
-      return;
-    }
     setLoading(true);
     try {
       const payload = {
         ...form,
-        pan_number: pan || null,
         credit_score: form.credit_score ? Number(form.credit_score) : null,
       };
       const customer = await createCustomer(payload);
-      onAdded && onAdded(customer);
+      if (customer) onAdded && onAdded(customer);
       onClose();
     } catch (err) {
       setError(err.detail || err.message || "Failed to create customer.");
@@ -68,22 +53,6 @@ export default function AddCustomerModal({ onClose, onAdded }) {
           <div>
             <label className="lw-label block mb-1">Email</label>
             <input className="lw-input" type="email" required value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="rahul@example.com" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="lw-label block mb-1">Product</label>
-              <select className="lw-input" value={form.product_code} onChange={(e) => set("product_code", e.target.value)}>
-                {PRODUCTS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="lw-label block mb-1">PAN Number <span className="text-on-surface-variant font-normal">(optional)</span></label>
-              <input className="lw-input uppercase" maxLength={10}
-                value={form.pan_number}
-                onChange={(e) => set("pan_number", e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
-                placeholder="ABCDE1234F" />
-            </div>
           </div>
 
           <div>

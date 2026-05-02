@@ -4,13 +4,30 @@ import StatusBadge from "./StatusBadge";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function Avatar({ name }) {
+function Avatar({ name, frameUrl }) {
   const initials = (name || "?")
     .split(" ")
     .slice(0, 2)
     .map((w) => w[0] || "")
     .join("")
     .toUpperCase();
+
+  if (frameUrl) {
+    return (
+      <div className="w-16 h-16 rounded-full overflow-hidden shrink-0 ring-2 ring-status-green-fg/40">
+        <img
+          src={frameUrl}
+          alt="Liveness frame"
+          className="w-full h-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+            e.currentTarget.parentElement.classList.add("fallback");
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="w-16 h-16 rounded-full bg-amber text-ink flex items-center justify-center text-2xl font-bold shrink-0 select-none">
       {initials}
@@ -243,7 +260,7 @@ export default function SessionStatusDrawer({ customer, onClose }) {
         {/* ── Header ─────────────────────────────────────────────────────────── */}
         <div className="px-8 py-5 border-b border-border flex items-center justify-between gap-6 bg-surface shrink-0">
           <div className="flex items-center gap-5">
-            <Avatar name={displayName} />
+            <Avatar name={displayName} frameUrl={data?.liveness_frame_url} />
             <div>
               <h2 className="text-xl font-bold">{displayName}</h2>
               <p className="text-sm text-on-surface-variant mt-0.5">{customer.email || "—"}</p>
@@ -361,9 +378,15 @@ export default function SessionStatusDrawer({ customer, onClose }) {
               <div className="overflow-y-auto">
 
                 {/* Decision */}
-                {(dec || ["approved","declined","hitl"].includes(data.status)) && (
+                {(dec || ["approved","declined","hitl"].includes(data.status?.toLowerCase())) && (
                   <ColSection title="Decision Breakdown">
                     <ExplanationBlock data={data} dec={dec} />
+                    {!dec ? (
+                      <CardBlock title="Pending Review">
+                        <p className="text-sm text-on-surface-variant">This application is awaiting manual review. No automated decision has been issued yet.</p>
+                      </CardBlock>
+                    ) : (
+                    <>
                     <CardBlock title="Layer 1 — Hard Rules">
                       <Row
                         label="Rules Passed"
@@ -432,11 +455,37 @@ export default function SessionStatusDrawer({ customer, onClose }) {
                         )}
                       </CardBlock>
                     )}
+                    </>
+                    )}
                   </ColSection>
                 )}
 
                 {/* Biometrics */}
                 <ColSection title="Biometrics &amp; Identity Verification">
+                  {data.liveness_frame_url && (
+                    <div className="mb-4">
+                      <p className="text-xs text-on-surface-variant uppercase tracking-widest mb-2 font-semibold">Captured Face Frame</p>
+                      <div className="flex gap-3 items-start">
+                        <img
+                          src={data.liveness_frame_url}
+                          alt="Liveness capture"
+                          className="w-32 h-32 object-cover rounded-lg ring-1 ring-border"
+                        />
+                        <div className="text-xs text-on-surface-variant space-y-1 pt-1">
+                          <p>Best-confidence frame captured during liveness check.</p>
+                          {data.face_confidence != null && (
+                            <p>Face confidence: <span className="font-semibold text-on-surface">{data.face_confidence.toFixed(3)}</span></p>
+                          )}
+                          {data.estimated_age != null && (
+                            <p>Estimated age: <span className="font-semibold text-on-surface">{Math.round(data.estimated_age)} yrs</span></p>
+                          )}
+                          {data.estimated_gender && (
+                            <p>Gender: <span className="font-semibold text-on-surface capitalize">{data.estimated_gender}</span></p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
                     <div className="lw-card p-3 text-center">
                       <p className="text-xs text-on-surface-variant mb-1">Liveness</p>
@@ -446,10 +495,10 @@ export default function SessionStatusDrawer({ customer, onClose }) {
                     </div>
                     <div className="lw-card p-3 text-center">
                       <p className="text-xs text-on-surface-variant mb-1">Anti-Spoof</p>
-                      <p className={`text-2xl font-bold ${data.anti_spoof_score > 0.7 ? "text-status-green-fg" : data.anti_spoof_score > 0.5 ? "text-status-amber-fg" : "text-destructive"}`}>
+                      <p className={`text-2xl font-bold ${data.anti_spoof_score == null ? "text-on-surface-variant" : data.anti_spoof_score > 0.7 ? "text-status-green-fg" : data.anti_spoof_score > 0.5 ? "text-status-amber-fg" : "text-destructive"}`}>
                         {data.anti_spoof_score != null ? data.anti_spoof_score.toFixed(2) : "—"}
                       </p>
-                      <p className={`text-xs mt-1 ${data.anti_spoof_passed ? "text-status-green-fg" : "text-destructive"}`}>
+                      <p className={`text-xs mt-1 ${data.anti_spoof_passed == null ? "text-on-surface-variant" : data.anti_spoof_passed ? "text-status-green-fg" : "text-destructive"}`}>
                         {data.anti_spoof_passed == null ? "—" : data.anti_spoof_passed ? "Passed" : "Failed"}
                       </p>
                       {data.spoof_type && (

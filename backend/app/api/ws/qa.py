@@ -58,6 +58,7 @@ async def ws_qa(websocket: WebSocket, session_id: str):
         all_transcripts: list[str] = []
         all_extractions: list[dict] = []
         question_latencies: list[float] = []
+        all_audio_chunks: list[bytes] = []
         hesitation_count = 0
         retry_count = 0
 
@@ -86,9 +87,10 @@ async def ws_qa(websocket: WebSocket, session_id: str):
                     "timer_seconds": _MAX_ANSWER_S,
                 })
 
-                transcript, latency_ms, hesitations, _silence = await _collect_answer(
+                transcript, latency_ms, hesitations, _silence, audio_chunks = await _collect_answer(
                     websocket, q_idx, _MAX_ANSWER_S
                 )
+                all_audio_chunks.extend(audio_chunks)
                 all_transcripts.append(transcript)
                 question_latencies.append(latency_ms)
                 hesitation_count += hesitations
@@ -165,6 +167,7 @@ async def ws_qa(websocket: WebSocket, session_id: str):
                 employer_name=merged.get("employer_name"),
                 job_tenure_years=merged.get("job_tenure_years"),
                 loan_purpose=merged.get("loan_purpose"),
+                requested_amount=merged.get("requested_amount"),
                 preferred_tenure_months=merged.get("preferred_tenure_months"),
                 existing_emi_monthly=merged.get("existing_emi_monthly", 0.0),
                 has_existing_loans=merged.get("has_existing_loans"),
@@ -216,6 +219,11 @@ async def ws_qa(websocket: WebSocket, session_id: str):
             # pipeline_started, so the task always sees committed data.
             await db.commit()
 
+            # Fire-and-forget S3 upload of full QA recording
+            if all_audio_chunks:
+                from app.services.s3_service import upload_audio_recording
+                asyncio.create_task(_upload_qa_recording(session, all_audio_chunks))
+
             asyncio.create_task(
                 run_post_qa_pipeline(
                     session_id=str(session.id),
@@ -252,14 +260,14 @@ async def _collect_answer(
     websocket: WebSocket,
     question_index: int,
     max_seconds: int,
-) -> tuple[str, float, int, bool]:
+) -> tuple[str, float, int, bool, list[bytes]]:
     """
     Collect audio chunks until silence_timeout, manual_advance, or deadline.
-    Returns (full_transcript, latency_ms, hesitation_count, silence_triggered).
-    silence_triggered=True means the client detected 5s of silence and ended the answer.
+    Returns (full_transcript, latency_ms, hesitation_count, silence_triggered, pcm_chunks).
     """
     buf = AudioStreamBuffer()
     full_text_parts: list[str] = []
+    pcm_chunks: list[bytes] = []
     hesitations = 0
     silence_triggered = False
     t_start = time.perf_counter()
@@ -280,6 +288,7 @@ async def _collect_answer(
         raw_text = data.get("text")
 
         if raw_bytes:
+            pcm_chunks.append(raw_bytes)
             chunk = await buf.push(raw_bytes)
             if chunk:
                 if chunk.text:
@@ -329,7 +338,7 @@ async def _collect_answer(
 
     full_transcript = " ".join(full_text_parts).strip()
     latency_ms = (time.perf_counter() - t_start) * 1000
-    return full_transcript, latency_ms, hesitations, silence_triggered
+    return full_transcript, latency_ms, hesitations, silence_triggered, pcm_chunks
 
 
 async def _maybe_retry(websocket: WebSocket, q_idx: int, q_text: str) -> str | None:
@@ -351,7 +360,7 @@ async def _maybe_retry(websocket: WebSocket, q_idx: int, q_text: str) -> str | N
                     "phase": "answer",
                     "timer_seconds": 60,
                 })
-                transcript, _, _, _ = await _collect_answer(websocket, q_idx, 60)
+                transcript, _, _, _, _ = await _collect_answer(websocket, q_idx, 60)
                 return transcript
     except (asyncio.TimeoutError, json.JSONDecodeError):
         pass
@@ -404,3 +413,20 @@ def _parse_date(dob_str: str | None):
         return date.fromisoformat(dob_str)
     except (ValueError, TypeError):
         return None
+
+
+async def _upload_qa_recording(session, pcm_chunks: list[bytes]) -> None:
+    from app.services.s3_service import upload_audio_recording
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import select
+    key = await upload_audio_recording(session.token_jti, pcm_chunks, label="qa")
+    if not key:
+        return
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Session).where(Session.token_jti == session.token_jti)
+        )
+        s = result.scalar_one_or_none()
+        if s:
+            s.recording_path = key
+            await db.commit()

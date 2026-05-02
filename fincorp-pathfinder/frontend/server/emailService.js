@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -19,32 +20,25 @@ export function previewEmail(customerName, sessionUrl, expiryHours) {
 export async function sendKycEmail({ toEmail, customerName, sessionUrl, expiryHours }) {
   const html = previewEmail(customerName, sessionUrl, expiryHours);
 
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) throw new Error("RESEND_API_KEY not set");
-
-  const fromAddress = process.env.EMAIL_FROM_ADDRESS || "onboarding@resend.dev";
-  const fromName = process.env.EMAIL_FROM_NAME || "Loan Wizard";
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    port: Number(process.env.EMAIL_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
     },
-    body: JSON.stringify({
-      from: `${fromName} <${fromAddress}>`,
-      to: [toEmail],
-      subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
-      html,
-      text: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
-    }),
   });
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Resend API ${res.status}: ${body}`);
-  }
+  const from = process.env.EMAIL_FROM || `Loan Wizard <${process.env.EMAIL_USER}>`;
 
-  const data = await res.json();
-  return { success: true, messageId: data.id };
+  const info = await transporter.sendMail({
+    from,
+    to: toEmail,
+    subject: "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
+    html,
+    text: `Hi ${customerName}, your KYC session is ready. Visit: ${sessionUrl} — expires in ${expiryHours} hours.`,
+  });
+
+  return { success: true, messageId: info.messageId };
 }

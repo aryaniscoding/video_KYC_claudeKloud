@@ -4,7 +4,7 @@ import SendLinkModal from "./SendLinkModal";
 import SessionStatusDrawer from "./SessionStatusDrawer";
 import { resendLink } from "@/lib/apiClient";
 
-const STATUSES = ["All", "Link Sent", "In Progress", "Approved", "Declined", "HITL", "Expired", "Dropped", "Processing"];
+const STATUSES = ["All", "Link Sent", "In Progress", "Approved", "Declined", "Manual Review", "Expired", "Dropped", "Processing"];
 
 export default function CustomerTable({ customers, onUpdate, onToast }) {
   const [search, setSearch] = useState("");

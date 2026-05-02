@@ -78,6 +78,17 @@ export async function getDownloadUrl(offerRefId) {
   return apiFetch(`/offers/${offerRefId}/download`);
 }
 
+// ── PAN Submission ──────────────────────────────────────────────
+// POST /session/{session_id}/pan
+
+export async function submitPan(sessionId, panNumber) {
+  if (USE_MOCK) return { success: true };
+  return apiFetch(`/session/${sessionId}/pan`, {
+    method: "POST",
+    body: JSON.stringify({ pan_number: panNumber }),
+  });
+}
+
 // ── WebSocket URL builder ───────────────────────────────────────
 
 const WS_BASE = import.meta.env.VITE_WS_BASE_URL || "ws://localhost:8000";
@@ -111,7 +122,7 @@ export async function getCustomers() {
 // POST /admin/customers
 
 export async function createCustomer(payload) {
-  if (USE_MOCK) return null;
+  if (USE_MOCK) return mockApi.createCustomer ? mockApi.createCustomer(payload) : null;
   return apiFetch("/admin/customers", {
     method: "POST",
     headers: adminHeaders(),

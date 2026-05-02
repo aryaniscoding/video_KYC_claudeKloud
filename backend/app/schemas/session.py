@@ -91,6 +91,7 @@ class EMIOption(BaseModel):
 
 class OfferResponse(BaseModel):
     eligible: bool
+    under_review: bool = False
     approved_amount: float | None = None
     interest_rate_pct: float | None = None
     recommended_tenure_months: int | None = None

@@ -48,6 +48,8 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
 
         frames_jpeg: list[bytes] = []
         challenge_jpeg: list[bytes] = []
+        # (frame_bytes, face_confidence) — we keep only the best-confidence frame for S3
+        best_frame: tuple[bytes, float] = (b"", 0.0)
         in_challenge = False
 
         try:
@@ -65,6 +67,8 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
 
                     # Per-frame lightweight result via Rekognition
                     fr = await analyze_frame(data, frame_idx)
+                    if fr.face_detected and (fr.face_confidence or 0.0) > best_frame[1]:
+                        best_frame = (data, fr.face_confidence or 0.0)
                     await websocket.send_json({
                         "type": "frame_result",
                         "frame_index": frame_idx,
@@ -92,6 +96,7 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                                 "anti_spoof_score": result_passive.anti_spoof_score,
                                 "spoof_type": result_passive.spoof_type,
                             })
+                            await _upload_best_frame(session, best_frame)
                             await db.commit()
                             await websocket.send_json({
                                 "type": "liveness_result",
@@ -108,7 +113,7 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                                 "liveness_score_so_far": result_passive.liveness_score,
                             })
                         else:
-                            await _save_liveness(db, session, result_passive)
+                            await _save_liveness(db, session, result_passive, best_frame)
                             await websocket.send_json({
                                 "type": "liveness_result",
                                 **_result_to_dict(result_passive),
@@ -147,7 +152,7 @@ async def ws_liveness(websocket: WebSocket, session_id: str):
                             final_passive.is_live = True
                             final_passive.hitl_required = False
 
-                        await _save_liveness(db, session, final_passive)
+                        await _save_liveness(db, session, final_passive, best_frame)
                         await websocket.send_json({
                             "type": "liveness_result",
                             "challenge_passed": blink_result["challenge_passed"],
@@ -195,7 +200,23 @@ def _result_to_dict(r) -> dict:
     }
 
 
-async def _save_liveness(db: AsyncSession, session: Session, result) -> None:
+async def _upload_best_frame(session: Session, best_frame: tuple[bytes, float]) -> None:
+    """Upload best-confidence JPEG frame to S3 and persist the key."""
+    frame_bytes, _ = best_frame
+    if not frame_bytes:
+        return
+    from app.services.s3_service import upload_frame
+    key = await upload_frame(session.token_jti, frame_bytes, label="liveness")
+    if key:
+        session.liveness_frame_key = key
+
+
+async def _save_liveness(
+    db: AsyncSession,
+    session: Session,
+    result,
+    best_frame: tuple[bytes, float] = (b"", 0.0),
+) -> None:
     session.liveness_score = result.liveness_score
     session.face_confidence = result.face_confidence
     session.estimated_age = result.estimated_age
@@ -207,6 +228,7 @@ async def _save_liveness(db: AsyncSession, session: Session, result) -> None:
     session.spoof_type = result.spoof_type
     if not result.hitl_required:
         session.status = SessionStatus.CONSENT
+    await _upload_best_frame(session, best_frame)
     await _log_audit(db, session, "liveness", "liveness_complete", {
         "liveness_score": result.liveness_score,
         "estimated_age": result.estimated_age,
@@ -215,6 +237,7 @@ async def _save_liveness(db: AsyncSession, session: Session, result) -> None:
         "anti_spoof_score": result.anti_spoof_score,
         "anti_spoof_passed": result.anti_spoof_passed,
         "spoof_type": result.spoof_type,
+        "liveness_frame_key": session.liveness_frame_key,
     })
     await db.commit()
 

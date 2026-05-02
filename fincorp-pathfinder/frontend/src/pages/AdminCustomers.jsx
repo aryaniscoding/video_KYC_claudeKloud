@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import NavBar from "@/components/admin/NavBar";
 import CustomerTable from "@/components/admin/CustomerTable";
@@ -6,24 +6,39 @@ import AddCustomerModal from "@/components/admin/AddCustomerModal";
 import DemoBadge from "@/components/DemoBadge";
 import { getCustomers } from "@/lib/apiClient";
 
+const POLL_INTERVAL_MS = 30_000;
+
 export default function AdminCustomers() {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const pollRef = useRef(null);
+
+  const fetchCustomers = useCallback(async (silent = false) => {
+    if (!silent) setRefreshing(true);
+    try {
+      const c = await getCustomers();
+      setCustomers(c);
+    } finally {
+      setLoading(false);
+      if (!silent) setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined" && !localStorage.getItem("lw_admin_token")) {
       navigate({ to: "/admin/login" });
       return;
     }
-    getCustomers().then((c) => { setCustomers(c); setLoading(false); });
-  }, [navigate]);
+    fetchCustomers();
+    pollRef.current = setInterval(() => fetchCustomers(true), POLL_INTERVAL_MS);
+    return () => clearInterval(pollRef.current);
+  }, [navigate, fetchCustomers]);
 
-  const updateStatus = (id, status) => {
-    setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, status } : c)));
-  };
+  const updateStatus = () => fetchCustomers(true);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -36,9 +51,18 @@ export default function AdminCustomers() {
       <main className="max-w-[1440px] mx-auto px-12 py-8">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-semibold tracking-tight">Customers</h1>
-          <button onClick={() => setShowAddModal(true)} className="lw-btn lw-btn-primary px-5">
-            + Add Customer
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => fetchCustomers()}
+              disabled={refreshing}
+              className="lw-btn lw-btn-outline px-4 text-sm"
+            >
+              {refreshing ? "Refreshing..." : "Refresh"}
+            </button>
+            <button onClick={() => setShowAddModal(true)} className="lw-btn lw-btn-primary px-5">
+              + Add Customer
+            </button>
+          </div>
         </div>
         {loading ? (
           <p className="text-on-surface-variant">Loading customers...</p>

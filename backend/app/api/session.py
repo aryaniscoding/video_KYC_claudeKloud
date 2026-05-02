@@ -5,9 +5,11 @@ GET  /session/{token}           — validate JWT, run pre-checks, return session
 GET  /session/{session_id}/offer — get offer after decision
 GET  /offers/{offer_ref_id}/download — redirect to pre-signed PDF URL
 """
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -153,6 +155,32 @@ async def init_session(
     )
 
 
+# ── POST /session/{session_id}/pan ───────────────────────────────────────────
+
+class PanSubmitRequest(BaseModel):
+    pan_number: str
+
+@router.post("/session/{session_id}/pan", status_code=200)
+async def submit_pan(session_id: str, body: PanSubmitRequest, db: AsyncSession = Depends(get_db)):
+    pan = body.pan_number.strip().upper()
+    if not re.match(r"^[A-Z]{5}[0-9]{4}[A-Z]$", pan):
+        raise HTTPException(status_code=422, detail="Invalid PAN format. Must be 5 letters, 4 digits, 1 letter.")
+
+    result = await db.execute(select(Session).where(Session.token_jti == session_id))
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    cust_result = await db.execute(select(Customer).where(Customer.id == session.customer_id))
+    customer = cust_result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    customer.pan_number = pan
+    await db.commit()
+    return {"success": True}
+
+
 # ── GET /session/{session_id}/offer ──────────────────────────────────────────
 
 @router.get("/session/{session_id}/offer", response_model=OfferResponse)
@@ -189,6 +217,13 @@ async def get_offer(session_id: str, db: AsyncSession = Depends(get_db)):
             risk_factors=_shap_to_plain_english(
                 decision.top_positive_features if decision else None, mode="risk"
             ),
+        )
+
+    if session.status == SessionStatus.HITL:
+        return OfferResponse(
+            eligible=False,
+            under_review=True,
+            decline_reason="Your application has been flagged for manual review. Our team will contact you within 24 hours.",
         )
 
     if session.status != SessionStatus.APPROVED:

@@ -3,6 +3,7 @@ import React from "react";
 const STEPS = [
   { key: "welcome", label: "Welcome" },
   { key: "liveness", label: "Face Check" },
+  { key: "pan", label: "PAN" },
   { key: "consent", label: "Consent" },
   { key: "qa", label: "Questions" },
   { key: "processing", label: "Processing" },

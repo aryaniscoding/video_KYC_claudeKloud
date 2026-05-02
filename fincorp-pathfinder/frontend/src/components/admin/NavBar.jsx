@@ -32,7 +32,7 @@ export default function NavBar() {
         <div className="max-w-[1440px] mx-auto px-12 flex">
           {[
             { to: "/admin/customers", label: "All Customers" },
-            { to: "/admin/hitl", label: "HITL Queue" },
+            { to: "/admin/hitl", label: "Manual Review" },
           ].map((t) => {
             const active = path === t.to;
             return (

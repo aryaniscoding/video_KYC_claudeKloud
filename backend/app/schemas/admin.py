@@ -87,6 +87,7 @@ class ApplicationDetail(BaseModel):
     employer_name: str | None = None
     job_tenure_years: float | None = None
     loan_purpose: str | None = None
+    requested_amount: float | None = None
     preferred_tenure_months: int | None = None
     existing_emi_monthly: float | None = None
     has_existing_loans: bool | None = None
@@ -145,6 +146,9 @@ class SessionStatusResponse(BaseModel):
     hesitation_count: int | None = None
     question_retry_count: int | None = None
     velocity_fraud_flag: bool | None = None
+
+    # Media
+    liveness_frame_url: str | None = None
 
     # Application data
     application: ApplicationDetail | None = None

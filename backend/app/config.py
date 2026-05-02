@@ -36,12 +36,18 @@ class Settings(BaseSettings):
     # GeoIP
     geoip_db_path: str = "/app/data/geoip/GeoLite2-City.mmdb"
 
-    # SES
-    ses_from_email: str = "noreply@example.com"
+    # SendGrid
+    sendgrid_api_key: str = ""
+    sendgrid_from_email: str = "kyc@poonawalla.com"
+    sendgrid_from_name: str = "Poonawalla Fincorp"
 
-    # Storage
+    # Storage (Supabase buckets — legacy)
     storage_bucket_recordings: str = "kyc-recordings"
     storage_bucket_pdfs: str = "kyc-pdfs"
+
+    # S3 buckets for media (empty string = upload disabled)
+    s3_bucket_recordings: str = ""
+    s3_bucket_frames: str = ""
 
     # App
     app_env: str = "development"

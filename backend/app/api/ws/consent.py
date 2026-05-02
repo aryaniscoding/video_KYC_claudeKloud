@@ -102,10 +102,15 @@ async def ws_consent(websocket: WebSocket, session_id: str):
                     consent_hash = hashlib.sha256(transcript.encode()).hexdigest()
                     consent_ts = datetime.now(timezone.utc)
 
+                    # Upload consent audio to S3 (non-blocking)
+                    from app.services.s3_service import upload_raw_audio
+                    consent_key = await upload_raw_audio(session.token_jti, audio_bytes, label="consent")
+
                     session.consent_confidence = consent_confidence
                     session.consent_hash = consent_hash
                     session.consent_timestamp = consent_ts
                     session.consent_transcript = transcript
+                    session.consent_recording_key = consent_key
                     session.status = SessionStatus.QA
 
                     log = AuditLog(
@@ -117,6 +122,7 @@ async def ws_consent(websocket: WebSocket, session_id: str):
                             "consent_confidence": consent_confidence,
                             "timestamp_utc": consent_ts.isoformat(),
                             "language_detected": validation.get("language_detected"),
+                            "consent_recording_key": consent_key,
                         },
                         policy_ver=session.policy_ver,
                     )

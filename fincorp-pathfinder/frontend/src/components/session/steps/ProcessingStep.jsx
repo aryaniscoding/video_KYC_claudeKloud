@@ -59,6 +59,7 @@ export default function ProcessingStep({ session, onResult }) {
           if (res.processing) return; // 202 — still processing, keep polling
           clearInterval(pollTimer);
           if (res.eligible) onResult("offer", res);
+          else if (res.under_review) onResult("review", res);
           else onResult("declined", res);
         } catch (err) {
           // 400 or other error — stop polling, show declined
