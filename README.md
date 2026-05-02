@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 LOAN WIZARD
+#  LOAN WIZARD - team claudeKloud
 ### Agentic AI Video KYC · Loan Origination System
 #### Built for Poonawalla Fincorp · Problem Statement #3
 
@@ -79,14 +79,14 @@ Traditional NBFC loan onboarding is broken across every dimension:
 ---
 
 ## 🚀 Quick Links
-
+The entire project is deployed on the internet, live running and tested.
 | Service | URL | README |
 |---|---|---|
-| 🔵 **Backend API** | `https://your-backend.railway.app` | [backend/README.md](./backend/README.md) |
-| 🟠 **Frontend App** | `https://your-frontend.railway.app` | [frontend/README.md](./fincorp-pathfinder/frontend/README.md) |
-| 📧 **Email Server** | `https://your-email.railway.app` | [server/README.md](./fincorp-pathfinder/frontend/server/README.md) |
-| 📖 **API Docs** | `https://your-backend.railway.app/docs` | Swagger UI (auto-generated) |
-| ❤️ **Health Check** | `https://your-backend.railway.app/health` | Returns `{"status":"ok"}` |
+| 🔵 **Backend API** | `https://backend-production-8a7a.up.railway.app` | [backend/README.md](./backend/README.md) |
+| 🟠 **Frontend App** | `https://frontend-production-d74a.up.railway.app/` | [frontend/README.md](./fincorp-pathfinder/frontend/README.md) |
+| 📧 **Email Server** | `https://nodemailer-server-production-36f5.up.railway.app/` | [server/README.md](./fincorp-pathfinder/frontend/server/README.md) |
+| 📖 **API Docs** | `https://backend-production-8a7a.up.railway.app/docs` | Swagger UI (auto-generated) |
+| ❤️ **Health Check** | `https://backend-production-8a7a.up.railway.app/docs#/default/health_health_get` | Returns `{"status":"ok"}` |
 
 ---
 
@@ -767,9 +767,9 @@ flowchart TD
 
 | Name | Role |
 |---|---|
-| **Atharva** | Backend · ML Pipeline · LangGraph |
-| **Aryan** | Infrastructure · AWS · API Design |
-| **Moksh** | Frontend · Admin Dashboard · UX |
+| **Aryan** | Backend · ML Pipeline · LangGraph · Infra · Integration |
+| **Atharva** | Railway · AWS · API Design |
+| **Moksh** | ML model · Frontend · Admin Dashboard · UX |
 
 ---
 
