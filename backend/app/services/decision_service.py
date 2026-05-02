@@ -256,6 +256,7 @@ def compute_offer(
     existing_emi: float = 0,
     preferred_tenure_months: int | None = None,
     loan_purpose: str | None = None,
+    requested_amount: float | None = None,
 ) -> dict | None:
     category = _PURPOSE_TO_CATEGORY.get(loan_purpose or "", "personal_loan")
     offer_params = _OFFER_TABLE[category].get(risk_band)
@@ -289,6 +290,8 @@ def compute_offer(
         max_by_affordability = max_affordable_emi * recommended_tenure
 
     approved_amount = min(income_based_amount, max_by_affordability)
+    if requested_amount and requested_amount > 0:
+        approved_amount = min(approved_amount, requested_amount)
     approved_amount = max(10000, round(approved_amount / 1000) * 1000)
 
     emi_options = []
@@ -334,6 +337,7 @@ def build_35_features(
     credit_score = float(customer.get("credit_score") or 0)
     total_outstanding = float(customer.get("total_outstanding_inr") or 0)
 
+    requested_amount = float(application.get("requested_amount") or 0)
     foir_ratio = existing_emi / monthly_income if monthly_income > 0 else 0
     dti = (existing_emi * 12) / (monthly_income * 12) if monthly_income > 0 else 0
 
@@ -367,8 +371,8 @@ def build_35_features(
         "employer_tier": employer_tier,
         "job_tenure_years": tenure_yrs,
         # Loan Request (4)
-        "requested_amount": 0,
-        "loan_to_income_ratio": 0,
+        "requested_amount": requested_amount,
+        "loan_to_income_ratio": round(requested_amount / monthly_income, 4) if monthly_income > 0 else 0,
         "preferred_tenure_months": float(application.get("preferred_tenure_months") or 24),
         "loan_purpose_encoded": loan_purpose_enc,
         "loan_purpose": application.get("loan_purpose"),

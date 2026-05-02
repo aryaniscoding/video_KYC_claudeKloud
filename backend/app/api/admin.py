@@ -13,14 +13,14 @@ POST /admin/hitl/{session_id}/decision
 import hashlib
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AdminUser, Customer, Session, SessionStatus, AuditLog, Decision, Application
+from app.models import AdminUser, Customer, Session, SessionStatus, AuditLog, Decision, Application, OfferPDF
 from app.schemas.admin import (
     AdminLoginRequest, AdminLoginResponse,
     CustomerCreate, CustomerResponse,
@@ -29,7 +29,7 @@ from app.schemas.admin import (
     HITLQueueItem, HITLDecisionRequest,
 )
 from app.services.jwt_service import create_admin_token, create_session_token
-from app.services.email_service import send_kyc_link_email
+from app.services.email_service import send_kyc_link_email, send_offer_email, send_rejection_email
 from app.services.s3_service import generate_presigned_url
 from passlib.context import CryptContext
 
@@ -138,11 +138,25 @@ async def create_customer(
 ):
     phone_hash = _hash_phone(body.phone)
 
-    # idempotent — return existing if same phone
+    # Reject if same phone already registered — return existing details so the
+    # frontend can show a meaningful "already exists" message.
     result = await db.execute(select(Customer).where(Customer.phone_hash == phone_hash))
     existing = result.scalar_one_or_none()
     if existing:
-        return existing
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "customer_exists",
+                "name": existing.name,
+                "email": existing.email,
+                "phone_last4": existing.phone_last4,
+                "pan_number": existing.pan_number,
+                "credit_score": existing.credit_score,
+                "product_code": existing.product_code,
+                "created_at": existing.created_at.isoformat() if existing.created_at else None,
+                "id": str(existing.id),
+            },
+        )
 
     customer = Customer(
         name=body.name,
@@ -428,6 +442,7 @@ async def get_hitl_queue(
 async def hitl_decision(
     session_id: str,
     body: HITLDecisionRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(get_current_admin),
 ):
@@ -437,6 +452,9 @@ async def hitl_decision(
         raise HTTPException(status_code=404, detail="Session not found")
     if session.status != SessionStatus.HITL:
         raise HTTPException(status_code=400, detail="Session is not in HITL queue")
+
+    cust_result = await db.execute(select(Customer).where(Customer.id == session.customer_id))
+    customer = cust_result.scalar_one()
 
     if body.decision == "approve":
         session.status = SessionStatus.APPROVED
@@ -458,5 +476,26 @@ async def hitl_decision(
     )
     db.add(log)
     await db.commit()
+
+    if body.decision == "approve":
+        dec_r = await db.execute(select(Decision).where(Decision.session_id == session.id))
+        dec = dec_r.scalar_one_or_none()
+        pdf_r = await db.execute(select(OfferPDF).where(OfferPDF.session_id == session.id))
+        pdf = pdf_r.scalar_one_or_none()
+        background_tasks.add_task(
+            send_offer_email,
+            to_email=customer.email,
+            customer_name=customer.name,
+            download_url=pdf.download_url if pdf else "",
+            approved_amount=dec.approved_amount if dec else 0,
+            interest_rate=dec.interest_rate if dec else 0,
+        )
+    elif body.decision == "decline":
+        background_tasks.add_task(
+            send_rejection_email,
+            to_email=customer.email,
+            customer_name=customer.name,
+            decline_reason=body.notes or "Your application did not meet our current eligibility criteria.",
+        )
 
     return {"status": "ok", "new_status": session.status.value}

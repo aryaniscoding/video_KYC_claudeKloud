@@ -80,7 +80,7 @@ def _compute_ip_risk(flags: dict) -> float:
     return min(score, 1.0)
 
 
-def _compute_geo_risk(
+async def _compute_geo_risk(
     latitude: float | None,
     longitude: float | None,
     ip_city: str | None,
@@ -88,41 +88,55 @@ def _compute_geo_risk(
 ) -> float:
     """
     Formula: city_mismatch×0.40 + pincode_risk_tier×0.40 + state_flag×0.20
-    When GPS is available, city_mismatch is GPS-city vs IP-city.
-    Without GPS, we can't compute mismatch — default to 0.10 (slight uncertainty).
+    When GPS is available, reverse-geocodes via Nominatim and compares to IP city.
+    Without GPS, falls back to 0.10 (slight uncertainty).
     """
     if latitude is None or longitude is None:
         return 0.10
 
-    # Reverse geocode GPS coords to city/state using GeoIP2 (same DB, lookup by lat/lon not available)
-    # For now we use a simple distance heuristic: if GPS and IP give same country, low risk.
-    # Real implementation: use a reverse geocoding service or MaxMind Insights
-    gps_city = _reverse_geocode_city(latitude, longitude)
+    gps_city, gps_state = await _reverse_geocode_city_nominatim(latitude, longitude)
 
     city_mismatch_score = 0.0
     state_flag = 0.0
 
     if ip_city and gps_city:
-        # Normalize to lowercase for comparison
         if ip_city.lower() not in gps_city.lower() and gps_city.lower() not in ip_city.lower():
-            city_mismatch_score = 0.6   # cities don't match at all
+            city_mismatch_score = 0.6
+
+    if ip_state and gps_state:
+        if ip_state.lower() not in gps_state.lower() and gps_state.lower() not in ip_state.lower():
+            state_flag = 0.4
 
     pincode_risk_tier = 0.0   # populated later when pincode extracted from Q&A
 
     return min(city_mismatch_score * 0.40 + pincode_risk_tier * 0.40 + state_flag * 0.20, 1.0)
 
 
-def _reverse_geocode_city(lat: float, lon: float) -> str | None:
-    """Use MaxMind GeoLite2 for approximate city from GPS coords — best effort."""
-    db_path = settings.geoip_db_path
-    if not Path(db_path).exists():
-        return None
+async def _reverse_geocode_city_nominatim(lat: float, lon: float) -> tuple[str | None, str | None]:
+    """
+    Reverse geocode GPS coordinates to (city, state) using OpenStreetMap Nominatim.
+    Free, no API key required. Returns (city, state) or (None, None) on failure.
+    """
     try:
-        # GeoIP2 doesn't do reverse GPS→city; this is a placeholder.
-        # In production: use Google Maps Geocoding API (free tier: 200$/month credit) or Nominatim.
-        return None
-    except Exception:
-        return None
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lon, "format": "json", "zoom": 10},
+                headers={"User-Agent": "PoonawallFincorpKYC/1.0"},
+            )
+        data = resp.json()
+        addr = data.get("address", {})
+        city = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("county")
+        )
+        state = addr.get("state")
+        return city, state
+    except Exception as exc:
+        logger.warning("Nominatim reverse geocode failed (%.5f, %.5f): %s", lat, lon, exc)
+        return None, None
 
 
 def _compute_device_risk(device_fingerprint: str | None) -> float:
@@ -156,7 +170,7 @@ async def compute_pre_session_scores(
 
     ip_flags = await _fetch_ip_flags(ip_address)
     ip_risk_score = _compute_ip_risk(ip_flags)
-    geo_risk_score = _compute_geo_risk(latitude, longitude, ip_flags.get("ip_city"), ip_flags.get("ip_state"))
+    geo_risk_score = await _compute_geo_risk(latitude, longitude, ip_flags.get("ip_city"), ip_flags.get("ip_state"))
     device_risk_score = _compute_device_risk(device_fingerprint)
 
     return {

@@ -106,6 +106,7 @@ async def node_form_assembly(state: PipelineState) -> PipelineState:
             "preferred_tenure_months": application.preferred_tenure_months,
             "existing_emi_monthly": application.existing_emi_monthly,
             "loan_purpose": application.loan_purpose,
+            "requested_amount": application.requested_amount,
             "extraction_confidence_avg": application.extraction_confidence_avg,
             "inconsistency_score": application.inconsistency_score,
         }
@@ -177,6 +178,7 @@ async def node_offer_matrix(state: PipelineState) -> PipelineState:
         existing_emi=features.get("existing_emi_monthly", 0),
         preferred_tenure_months=features.get("preferred_tenure_months"),
         loan_purpose=features.get("loan_purpose"),
+        requested_amount=features.get("requested_amount"),
     )
     state["offer"] = offer
     state["approved_amount"] = offer["approved_amount"] if offer else None
@@ -191,6 +193,7 @@ async def node_pdf_generation(state: PipelineState) -> PipelineState:
     from app.models import Session, Application, Customer, Decision, OfferPDF, SessionStatus
     from app.services.pdf_service import generate_offer_pdf
     from app.services.llm_extraction_service import shap_to_plain_english
+    from app.services.email_service import send_offer_email
 
     # Generate plain-English SHAP reasons via Gemini
     shap_reasons = []
@@ -261,6 +264,14 @@ async def node_pdf_generation(state: PipelineState) -> PipelineState:
         session.status = SessionStatus.APPROVED
         await db.commit()
 
+    await send_offer_email(
+        to_email=customer.email,
+        customer_name=customer.name,
+        download_url=pdf_result["download_url"],
+        approved_amount=state["approved_amount"],
+        interest_rate=offer["interest_rate"],
+    )
+
     state["pdf_storage_path"] = pdf_result["storage_path"]
     state["pdf_hash"] = pdf_result["pdf_hash"]
     state["download_url"] = pdf_result["download_url"]
@@ -273,9 +284,10 @@ async def node_pdf_generation(state: PipelineState) -> PipelineState:
 async def node_decline(state: PipelineState) -> PipelineState:
     from app.database import AsyncSessionLocal
     from app.models import Session, Application, Decision, SessionStatus
+    from app.services.email_service import send_rejection_email
 
     async with AsyncSessionLocal() as db:
-        session, application, _ = await _load_session_app_customer(
+        session, application, customer = await _load_session_app_customer(
             db, state["session_id"], state["application_id"]
         )
         decision = Decision(
@@ -297,6 +309,13 @@ async def node_decline(state: PipelineState) -> PipelineState:
         db.add(decision)
         session.status = SessionStatus.DECLINED
         await db.commit()
+
+    decline_reason = state.get("failing_rule_reason") or state.get("decline_reason")
+    await send_rejection_email(
+        to_email=customer.email,
+        customer_name=customer.name,
+        decline_reason=decline_reason,
+    )
 
     state["next_node"] = "audit_commit"
     return state

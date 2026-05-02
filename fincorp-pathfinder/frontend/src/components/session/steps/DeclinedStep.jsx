@@ -18,7 +18,7 @@ function RiskBadge({ band }) {
 export default function DeclinedStep({ result }) {
   const tips = result?.decline_tips || [
     "Reduce your existing EMI obligations before reapplying.",
-    "Maintain a healthy credit score above 700.",
+    "Maintain a healthy CIBIL score above 700.",
     "Reapply after 90 days for a fresh assessment.",
   ];
   const isMLDecline = result?.risk_band && !result?.failing_rule;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getSessionStatus } from "@/lib/apiClient";
+import { getSessionStatus, submitHitlDecision } from "@/lib/apiClient";
 import StatusBadge from "./StatusBadge";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -219,7 +219,17 @@ const YRS  = (n) => n != null ? `${n} yr${n === 1 ? "" : "s"}` : null;
 export default function SessionStatusDrawer({ customer, onClose }) {
   const [data, setData] = useState(null);
   const [err,  setErr]  = useState(null);
+  const [hitlNotes,    setHitlNotes]    = useState("");
+  const [hitlSubmitting, setHitlSubmitting] = useState(false);
+  const [hitlDone,     setHitlDone]     = useState(null); // "approved" | "declined"
   const sessionId = customer.latest_session_id || customer.session_id;
+
+  const reload = () => {
+    if (!sessionId) return;
+    getSessionStatus(sessionId)
+      .then(setData)
+      .catch((e) => setErr(e.detail || e.message || "Failed to load."));
+  };
 
   useEffect(() => {
     if (!sessionId) { setErr("No session found for this customer."); return; }
@@ -229,6 +239,20 @@ export default function SessionStatusDrawer({ customer, onClose }) {
       .catch((e) => { if (alive) setErr(e.detail || e.message || "Failed to load."); });
     return () => { alive = false; };
   }, [sessionId]);
+
+  const handleHitlDecision = async (decision) => {
+    if (hitlSubmitting) return;
+    setHitlSubmitting(true);
+    try {
+      await submitHitlDecision(sessionId, decision, hitlNotes);
+      setHitlDone(decision);
+      reload();
+    } catch (e) {
+      setErr(e.detail || e.message || "Failed to submit decision.");
+    } finally {
+      setHitlSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     const handler = (e) => { if (e.key === "Escape") onClose(); };
@@ -308,7 +332,7 @@ export default function SessionStatusDrawer({ customer, onClose }) {
                   <CardBlock title="Identity">
                     <Row label="Full Name"     value={app?.full_name}    />
                     <Row label="Date of Birth" value={app?.dob}          />
-                    <Row label="Credit Score" value={customer.credit_score} />
+                    <Row label="CIBIL Score" value={customer.credit_score} />
                     <Row label="PAN Number"   value={customer.pan_number || "—"} mono />
                   </CardBlock>
                   <CardBlock title="Address">
@@ -381,6 +405,50 @@ export default function SessionStatusDrawer({ customer, onClose }) {
                 {(dec || ["approved","declined","hitl"].includes(data.status?.toLowerCase())) && (
                   <ColSection title="Decision Breakdown">
                     <ExplanationBlock data={data} dec={dec} />
+
+                    {/* HITL action panel — only shown while session is in manual review */}
+                    {data.status === "hitl" && !hitlDone && (
+                      <div className="rounded-lg border-2 border-status-amber-fg/40 bg-status-amber-bg/40 p-4 mb-4">
+                        <p className="text-xs font-bold uppercase tracking-widest text-status-amber-fg mb-3">Manual Review Action</p>
+                        <textarea
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-status-amber-fg/50 mb-3"
+                          rows={3}
+                          placeholder="Add notes or decline reason (required for rejection)…"
+                          value={hitlNotes}
+                          onChange={(e) => setHitlNotes(e.target.value)}
+                          disabled={hitlSubmitting}
+                        />
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => handleHitlDecision("approve")}
+                            disabled={hitlSubmitting}
+                            className="flex-1 rounded-lg bg-status-green-fg text-white font-semibold py-2 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                          >
+                            {hitlSubmitting ? "Submitting…" : "✓ Approve Loan"}
+                          </button>
+                          <button
+                            onClick={() => handleHitlDecision("decline")}
+                            disabled={hitlSubmitting || !hitlNotes.trim()}
+                            className="flex-1 rounded-lg bg-destructive text-white font-semibold py-2 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                            title={!hitlNotes.trim() ? "Add a decline reason before rejecting" : ""}
+                          >
+                            {hitlSubmitting ? "Submitting…" : "✕ Decline"}
+                          </button>
+                        </div>
+                        {!hitlNotes.trim() && (
+                          <p className="text-xs text-status-amber-fg mt-2">A reason is required to decline.</p>
+                        )}
+                      </div>
+                    )}
+
+                    {hitlDone && (
+                      <div className={`rounded-lg border-2 p-4 mb-4 ${hitlDone === "approved" ? "border-status-green-fg/40 bg-status-green-bg/60" : "border-destructive/40 bg-destructive/5"}`}>
+                        <p className={`text-sm font-semibold ${hitlDone === "approved" ? "text-status-green-fg" : "text-destructive"}`}>
+                          {hitlDone === "approved" ? "✓ Loan approved — offer email sent to customer." : "✕ Application declined — notification email sent to customer."}
+                        </p>
+                      </div>
+                    )}
+
                     {!dec ? (
                       <CardBlock title="Pending Review">
                         <p className="text-sm text-on-surface-variant">This application is awaiting manual review. No automated decision has been issued yet.</p>

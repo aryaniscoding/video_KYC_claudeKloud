@@ -45,7 +45,7 @@ export default function CustomerTable({ customers, onUpdate, onToast }) {
         <table className="w-full text-sm">
           <thead className="bg-surface-container border-b border-border">
             <tr>
-              {["Name", "Phone", "Product", "Date", "Status", "Actions"].map((h) => (
+              {["Name", "Phone", "Date", "Status", "Actions"].map((h) => (
                 <th key={h} className="lw-label text-left px-4 py-3">{h}</th>
               ))}
             </tr>
@@ -55,7 +55,6 @@ export default function CustomerTable({ customers, onUpdate, onToast }) {
               <tr key={c.id} className="border-b border-border last:border-0 hover:bg-surface-container/50">
                 <td className="px-4 py-3 font-medium">{c.name}</td>
                 <td className="px-4 py-3 text-on-surface-variant">{c.phone}</td>
-                <td className="px-4 py-3">{c.product}</td>
                 <td className="px-4 py-3 text-on-surface-variant">{c.created_date}</td>
                 <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
                 <td className="px-4 py-3">
