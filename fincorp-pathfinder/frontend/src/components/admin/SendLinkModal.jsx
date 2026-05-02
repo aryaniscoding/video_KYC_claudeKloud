@@ -1,22 +1,6 @@
 import React, { useState } from "react";
 import { sendLink } from "@/lib/apiClient";
 
-const EMAIL_SERVER = import.meta.env.VITE_EMAIL_SERVER_URL;
-
-async function sendViaNodemailer(toEmail, customerName, sessionUrl, expiryHours) {
-  if (!EMAIL_SERVER) return { sent: false, reason: "no email server configured" };
-  const res = await fetch(`${EMAIL_SERVER}/api/send-email`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ toEmail, customerName, sessionUrl, expiryHours }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || body.error || `Email server ${res.status}`);
-  }
-  return { sent: true };
-}
-
 export default function SendLinkModal({ customer, onClose, onSent }) {
   const [email, setEmail] = useState(customer.email || `${customer.name.split(" ")[0].toLowerCase()}@example.com`);
   const [expiry, setExpiry] = useState(24);
@@ -31,20 +15,8 @@ export default function SendLinkModal({ customer, onClose, onSent }) {
     try {
       const r = await sendLink(customer.id, email, expiry);
       const kycUrl = r.session_url || r.kyc_url;
-
-      // Try Nodemailer email server; don't block on failure
-      let emailSent = r.email_sent || false;
-      let emailError = null;
-      if (!emailSent && EMAIL_SERVER) {
-        try {
-          await sendViaNodemailer(email, customer.name, kycUrl, expiry);
-          emailSent = true;
-        } catch (err) {
-          emailError = err.message;
-        }
-      }
-
-      setResult({ sessionUrl: kycUrl, emailSent, emailError });
+      const emailSent = r.email_sent || false;
+      setResult({ sessionUrl: kycUrl, emailSent, emailError: emailSent ? null : "Email delivery handled by server" });
       onSent && onSent(customer.id, kycUrl);
     } catch (err) {
       setError(err.detail || err.message || "Failed to create KYC link.");

@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     # GeoIP
     geoip_db_path: str = "/app/data/geoip/GeoLite2-City.mmdb"
 
-    # Email service (nodemailer HTTP server)
-    email_service_url: str = "http://localhost:3001"
+    # Resend email API
+    resend_api_key: str = ""
+    email_from: str = "Loan Wizard <onboarding@resend.dev>"
 
     # Storage
     storage_bucket_recordings: str = "kyc-recordings"
