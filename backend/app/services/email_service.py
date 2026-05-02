@@ -1,13 +1,33 @@
-"""Email delivery via Resend HTTP API."""
+"""Email delivery via AWS SES (boto3)."""
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-import httpx
+import boto3
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+_lock = threading.Lock()
+_ses_client = None
+_executor = ThreadPoolExecutor(max_workers=2)
+
+
+def _get_ses():
+    global _ses_client
+    if _ses_client is None:
+        with _lock:
+            if _ses_client is None:
+                _ses_client = boto3.client(
+                    "ses",
+                    region_name=settings.aws_region,
+                    aws_access_key_id=settings.aws_access_key_id,
+                    aws_secret_access_key=settings.aws_secret_access_key,
+                )
+    return _ses_client
 
 
 def _build_html(customer_name: str, kyc_url: str, expires_at: datetime) -> str:
@@ -53,35 +73,33 @@ async def send_kyc_link_email(
     kyc_url: str,
     expires_at: datetime,
 ) -> bool:
-    if not settings.resend_api_key:
-        logger.warning("RESEND_API_KEY not set — skipping email, KYC URL: %s", kyc_url)
+    if not settings.aws_access_key_id:
+        logger.warning("AWS credentials not set — skipping email")
         return False
 
     html = _build_html(customer_name, kyc_url, expires_at)
     hours = max(1, min(72, int((expires_at.timestamp() - datetime.utcnow().timestamp()) / 3600)))
 
+    def _send():
+        return _get_ses().send_email(
+            Source=settings.ses_from_email,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": "Your Video KYC Link — Poonawalla Fincorp Personal Loan"},
+                "Body": {
+                    "Html": {"Data": html},
+                    "Text": {"Data": f"Hi {customer_name}, your KYC session is ready. Visit: {kyc_url} — expires in {hours} hours."},
+                },
+            },
+        )
+
+    import asyncio
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.resend.com/emails",
-                headers={
-                    "Authorization": f"Bearer {settings.resend_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "from": settings.email_from,
-                    "to": [to_email],
-                    "subject": "Your Video KYC Link — Poonawalla Fincorp Personal Loan",
-                    "html": html,
-                    "text": f"Hi {customer_name}, your KYC session is ready. Visit: {kyc_url} — expires in {hours} hours.",
-                },
-            )
-        if resp.status_code == 200:
-            return True
-        logger.error("Resend API returned %s: %s", resp.status_code, resp.text)
-        return False
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_executor, _send)
+        return True
     except Exception as exc:
-        logger.error("Resend email error: %s", exc)
+        logger.error("SES send error: %s", exc)
         return False
 
 
