@@ -9,10 +9,6 @@ dotenv.config({ path: join(__dirname, ".env") });
 
 const TEMPLATE_PATH = join(__dirname, "email-template.html");
 
-/**
- * Compile the HTML template by replacing placeholders.
- * Exported separately so the template can be previewed without sending.
- */
 export function previewEmail(customerName, sessionUrl, expiryHours) {
   const raw = readFileSync(TEMPLATE_PATH, "utf-8");
   return raw
