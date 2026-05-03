@@ -17,6 +17,15 @@
 <br/>
 
 > **"No forms. No branch visits. One video call to loan approval."**
+> ## 🎥 Demo Video
+
+> Click below to watch full AI Video KYC flow 
+
+<div align="center">
+  <a href="https://drive.google.com/file/d/1fNN1A2DYp8BqO_asycg8cjPWxGEFw4L8/view">
+    <img src="./assets/demo-thumbnail.png" width="800"/>
+  </a>
+</div>
 >
 > A fully agentic, AI-driven Video KYC platform that takes a personal loan applicant from  
 > identity verification to a signed PDF offer letter — in under 12 minutes.
