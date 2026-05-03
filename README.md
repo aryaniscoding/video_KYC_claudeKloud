@@ -34,7 +34,7 @@
 
 ## 🎥 Demo Video
 
-#### Click below to watch full AI Video KYC flow (~2 min)
+#### Click below to watch full AI Video KYC flow 
 
 <div align="center">
   <a href="https://drive.google.com/file/d/1fNN1A2DYp8BqO_asycg8cjPWxGEFw4L8/view">
